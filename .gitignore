@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.pyc
+
+# Virtual environments
+.venv/
+venv/
+
+# VSCode
+.vscode/
+
+# PyTorch model/checkpoint files
+*.pt
+*.pth
+
+# Jupyter
+.ipynb_checkpoints/
