@@ -6,6 +6,9 @@ __pycache__/
 .venv/
 venv/
 
+# Practice Files
+practice/
+
 # VSCode
 .vscode/
 
