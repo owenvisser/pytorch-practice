@@ -12,6 +12,9 @@ practice/
 # VSCode
 .vscode/
 
+# Data folder
+data/
+
 # PyTorch model/checkpoint files
 *.pt
 *.pth
