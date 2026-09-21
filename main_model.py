@@ -2,23 +2,16 @@ import torch
 import pandas as pd
 import matplotlib.pyplot as plt
 
-from sim_data import generate_sim_data
-from graph_data import create_graphs
-from model import PatientGCN
-from training import (
-    split_graphs,
+from my_model import PatientGCN
+from my_training import (
     create_loaders,
     train_model,
     evaluate_model
 )
 
-
 # ============================================================
-# 1. GENERAL SETTINGS
+# 1. DEFINE MODEL SETTINGS
 # ============================================================
-
-# Random seed used for the simulated data and train/validation/test split.
-seed = 100
 
 # Training settings.
 n_epochs = 1000
@@ -26,17 +19,59 @@ batch_size = 32
 learning_rate = 0.001
 weight_decay = 0.0
 
-# Proportion of patients assigned to each data set.
-train_prop = 0.60
-val_prop = 0.20
-test_prop = 0.20
+
+weighting_options = [
+    #None,
+    "exponential"
+    #"gaussian"
+]
+
+d_options = [
+    #0.25,
+    #0.5,
+    0.75
+    #2.0,
+    #5.0
+]
+
+pooling_options = [
+    #"mean",
+    #"sum",
+    "max"
+    #"mean_max"
+]
+
+seed = 100
+
+torch.manual_seed(seed)
+
+if torch.cuda.is_available():
+    torch.cuda.manual_seed_all(seed)
 
 
 # ============================================================
-# 2. CHOOSE DEVICE
+# 2. LOAD SAVED GRAPH DATA
 # ============================================================
 
-# Use the GPU if CUDA is available.
+train_graphs = torch.load(
+    "data/train_graphs.pt",
+    weights_only=False
+)
+
+val_graphs = torch.load(
+    "data/val_graphs.pt",
+    weights_only=False
+)
+
+test_graphs = torch.load(
+    "data/test_graphs.pt",
+    weights_only=False
+)
+
+# ============================================================
+# 3. CHOOSE DEVICE
+# ============================================================
+
 device = torch.device(
     "cuda"
     if torch.cuda.is_available()
@@ -47,54 +82,7 @@ print("Device:", device)
 
 
 # ============================================================
-# 3. GENERATE SIMULATED DATA
-# ============================================================
-# here p is the number of features; i've coded strictly for 5, see sim_data.py
-
-long_data, patient_data = generate_sim_data(
-    N=5000,
-    min_visits=3,
-    max_visits=20,
-    p=5,
-    seed=seed
-)
-
-
-# ============================================================
-# 4. CREATE PATIENT GRAPHS
-# ============================================================
-
-graphs = create_graphs(
-    long_data=long_data,
-    patient_data=patient_data
-)
-
-print("Number of patient graphs:", len(graphs))
-
-
-# ============================================================
-# 5. SPLIT INTO TRAIN, VALIDATION, AND TEST SETS
-# ============================================================
-
-# We do this ONCE before running the different model setups.
-# This ensures every model is compared using exactly the same
-# patients in the training, validation, and test sets.
-
-train_graphs, val_graphs, test_graphs = split_graphs(
-    graphs=graphs,
-    train_prop=train_prop,
-    val_prop=val_prop,
-    test_prop=test_prop,
-    seed=seed
-)
-
-print("Training patients:", len(train_graphs))
-print("Validation patients:", len(val_graphs))
-print("Test patients:", len(test_graphs))
-
-
-# ============================================================
-# 6. CREATE DATA LOADERS
+# 4. CREATE DATA LOADERS
 # ============================================================
 
 train_loader, val_loader, test_loader = create_loaders(
@@ -104,36 +92,8 @@ train_loader, val_loader, test_loader = create_loaders(
     batch_size=batch_size
 )
 
-
 # ============================================================
-# 7. DEFINE MODEL SETTINGS TO COMPARE
-# ============================================================
-
-# Edge weighting methods.
-weighting_options = [
-    None,
-    "exponential",
-    "gaussian"
-]
-
-# Values of d to test for the weighted models.
-d_options = [
-    0.5,
-    1.0,
-    2.0,
-    5.0
-]
-
-# Graph pooling methods.
-pooling_options = [
-    "mean",
-    "sum",
-    "max"
-]
-
-
-# ============================================================
-# 8. CREATE EXPERIMENT CONFIGURATIONS
+# 5. CREATE EXPERIMENT CONFIGURATIONS
 # ============================================================
 
 # Each dictionary describes one model that we want to fit.
@@ -175,7 +135,7 @@ print("Number of models to fit:", len(experiments))
 
 
 # ============================================================
-# 9. CREATE OBJECTS TO STORE RESULTS
+# 6. CREATE OBJECTS TO STORE RESULTS
 # ============================================================
 
 # Summary statistics for each model will be stored here.
@@ -187,7 +147,7 @@ loss_histories = []
 
 
 # ============================================================
-# 10. RUN EACH MODEL
+# 7. RUN EACH MODEL
 # ============================================================
 
 for model_number, experiment in enumerate(experiments, start=1):
@@ -339,7 +299,7 @@ for model_number, experiment in enumerate(experiments, start=1):
 
 
 # ============================================================
-# 11. CREATE RESULTS TABLE
+# 8. CREATE RESULTS TABLE
 # ============================================================
 
 results_df = pd.DataFrame(
@@ -352,7 +312,7 @@ print(results_df)
 
 
 # ============================================================
-# 12. SORT MODELS BY BALANCED ACCURACY
+# 9. SORT MODELS BY BALANCED ACCURACY
 # ============================================================
 
 results_df = results_df.sort_values(
@@ -366,50 +326,117 @@ print(results_df)
 
 
 # ============================================================
-# 13. SAVE RESULTS
+# 10. SAVE RESULTS
 # ============================================================
 
 results_df.to_csv(
-    "model_results.csv",
+    "results/model_results.csv",
     index=False
 )
 
 
 # ============================================================
-# 14. PLOT VALIDATION LOSS CURVES
+# 11. PLOT VALIDATION LOSS CURVES
 # ============================================================
 
-plt.figure(
-    figsize=(10, 6)
+# Get each unique value of d that was actually used.
+plot_d_values = [
+    None
+] + d_options
+
+
+# Number of subplot columns.
+n_cols = 2
+
+# Calculate how many rows are needed.
+n_rows = (
+    len(plot_d_values)
+    + n_cols
+    - 1
+) // n_cols
+
+
+# Create the grid of plots.
+fig, axes = plt.subplots(
+    n_rows,
+    n_cols,
+    figsize=(14, 5 * n_rows)
 )
 
-
-for history in loss_histories:
-
-    weighting = history["weighting"]
-    d = history["d"]
-    pooling = history["pooling"]
+# Flatten the grid so we can loop through the plots easily.
+axes = axes.flatten()
 
 
-    # Create a label describing the model.
-    label = (
-        f"{weighting}, "
-        f"d={d}, "
-        f"{pooling}"
+# MAKE ONE PLOT FOR EACH VALUE OF D
+
+for i, d_value in enumerate(plot_d_values):
+
+    ax = axes[i]
+
+
+    for history in loss_histories:
+
+        history_d = history["d"]
+
+        # Only plot models belonging to this value of d.
+        if history_d == d_value:
+
+            weighting = history["weighting"]
+            pooling = history["pooling"]
+
+            label = (
+                f"{weighting}, "
+                f"{pooling}"
+            )
+
+            ax.plot(
+                history["validation_losses"],
+                label=label
+            )
+
+
+    # Give the no-weighting models a clearer title.
+    if d_value is None:
+
+        ax.set_title(
+            "No Edge Weighting"
+        )
+
+    else:
+
+        ax.set_title(
+            f"d = {d_value}"
+        )
+
+
+    ax.set_xlabel(
+        "Epoch"
+    )
+
+    ax.set_ylabel(
+        "Validation Loss"
     )
 
 
-    plt.plot(
-        history["validation_losses"],
-        label=label
+    # Put the legend outside each individual plot.
+    ax.legend(
+        bbox_to_anchor=(1.02, 1),
+        loc="upper left"
     )
 
 
-plt.xlabel("Epoch")
-plt.ylabel("Validation Loss")
-plt.title("Validation Loss by Model")
+# REMOVE UNUSED PLOTS
+# For example, if we create a 3 x 2 grid but only need 5 panels.
 
-plt.legend()
+for j in range(
+    len(plot_d_values),
+    len(axes)
+):
+
+    fig.delaxes(
+        axes[j]
+    )
+
 
 plt.tight_layout()
 plt.show()

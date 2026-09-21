@@ -1,0 +1,2 @@
+weighting,d,pooling,best_epoch,best_validation_loss,balanced_accuracy,sensitivity,specificity,TP,TN,FP,FN
+exponential,0.75,max,581,0.4131865193049113,0.822011252324112,0.7614314115308151,0.8825910931174089,383,218,29,120
