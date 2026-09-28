@@ -267,7 +267,7 @@ POOLING = "max"
 # 9. TRAINING SETTINGS
 # =============================================================================
 
-NUMBER_OF_EPOCHS = 500
+NUMBER_OF_EPOCHS = 1000
 
 LEARNING_RATE = 0.001
 

@@ -60,13 +60,13 @@ from src.data_simulation import simulate_longitudinal_data
 # 1. SIMULATION SETTINGS
 # =============================================================================
 
-N_PATIENTS = 1000
+N_PATIENTS = 5000
 
-MIN_VISITS = 6
+MIN_VISITS = 5
 
-MAX_VISITS = 10
+MAX_VISITS = 20
 
-REGRESSION_NOISE_SD = 1.0
+REGRESSION_NOISE_SD = 1
 
 RANDOM_SEED = 100
 

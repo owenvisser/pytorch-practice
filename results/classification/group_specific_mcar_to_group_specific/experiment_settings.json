@@ -21,7 +21,7 @@
     "pooling": "max",
     "total_parameters": 489,
     "trainable_parameters": 489,
-    "number_of_epochs": 500,
+    "number_of_epochs": 1000,
     "learning_rate": 0.001,
     "weight_decay": 0.0,
     "scheduler_factor": 0.5,
@@ -32,8 +32,8 @@
     "classification_threshold": 0.5,
     "early_stopping_patience": 100,
     "minimum_validation_improvement": 0.0001,
-    "epochs_completed": 133,
+    "epochs_completed": 136,
     "stopped_early": true,
-    "best_epoch": 33,
-    "best_validation_loss": 0.5340551535288492
+    "best_epoch": 36,
+    "best_validation_loss": 0.5358919719854991
 }

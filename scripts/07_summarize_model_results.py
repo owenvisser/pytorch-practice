@@ -171,6 +171,52 @@ CONDITION_LABELS = {
 
 
 # =============================================================================
+# LOAD TRAINING HISTORY
+# =============================================================================
+
+def load_training_history(
+    task,
+    condition
+):
+    """
+    Load the complete epoch-level training history for one fitted model.
+    """
+
+    history_path = (
+
+        RESULTS_DIRECTORY
+
+        /
+
+        task
+
+        /
+
+        condition
+
+        /
+
+        "training_history.csv"
+    )
+
+
+    if not history_path.exists():
+
+        raise FileNotFoundError(
+
+            "Training history was not found:\n"
+            f"{history_path}"
+        )
+
+
+    training_history = pd.read_csv(
+        history_path
+    )
+
+
+    return training_history
+
+# =============================================================================
 # 4. LOAD RESULTS
 # =============================================================================
 
@@ -595,6 +641,221 @@ plt.close(
     figure
 )
 
+# =============================================================================
+# CLASSIFICATION: VALIDATION LOSS ACROSS EPOCHS
+# =============================================================================
+
+figure, axis = plt.subplots(
+    figsize=(
+        12,
+        7
+    )
+)
+
+
+for condition in CONDITION_ORDER:
+
+    training_history = (
+        load_training_history(
+
+            task="classification",
+
+            condition=condition
+        )
+    )
+
+
+    axis.plot(
+
+        training_history[
+            "epoch"
+        ],
+
+        training_history[
+            "validation_loss"
+        ],
+
+        label=(
+            CONDITION_LABELS[
+                condition
+            ]
+        ),
+
+        linewidth=1.8
+    )
+
+
+axis.set_xlabel(
+    "Epoch"
+)
+
+
+axis.set_ylabel(
+    "Validation Loss"
+)
+
+
+axis.set_title(
+    "Classification Validation Loss During Training"
+)
+
+
+axis.grid(
+    alpha=0.25
+)
+
+
+# Place legend outside the plotting region.
+
+axis.legend(
+
+    loc="center left",
+
+    bbox_to_anchor=(
+        1.02,
+        0.5
+    ),
+
+    frameon=False
+)
+
+
+# Reserve space on the right for the external legend.
+
+figure.tight_layout(
+    rect=[
+        0,
+        0,
+        0.78,
+        1
+    ]
+)
+
+
+figure.savefig(
+
+    FIGURE_DIRECTORY
+
+    /
+
+    "classification_validation_loss.png",
+
+    dpi=300,
+
+    bbox_inches="tight"
+)
+
+
+plt.close(
+    figure
+)
+
+
+
+# =============================================================================
+# REGRESSION: VALIDATION LOSS ACROSS EPOCHS
+# =============================================================================
+
+figure, axis = plt.subplots(
+    figsize=(
+        12,
+        7
+    )
+)
+
+
+for condition in CONDITION_ORDER:
+
+    training_history = (
+        load_training_history(
+
+            task="regression",
+
+            condition=condition
+        )
+    )
+
+
+    axis.plot(
+
+        training_history[
+            "epoch"
+        ],
+
+        training_history[
+            "validation_loss"
+        ],
+
+        label=(
+            CONDITION_LABELS[
+                condition
+            ]
+        ),
+
+        linewidth=1.8
+    )
+
+
+axis.set_xlabel(
+    "Epoch"
+)
+
+
+axis.set_ylabel(
+    "Validation Loss"
+)
+
+
+axis.set_title(
+    "Regression Validation Loss During Training"
+)
+
+
+axis.grid(
+    alpha=0.25
+)
+
+
+axis.legend(
+
+    loc="center left",
+
+    bbox_to_anchor=(
+        1.02,
+        0.5
+    ),
+
+    frameon=False
+)
+
+
+figure.tight_layout(
+    rect=[
+        0,
+        0,
+        0.78,
+        1
+    ]
+)
+
+
+figure.savefig(
+
+    FIGURE_DIRECTORY
+
+    /
+
+    "regression_validation_loss.png",
+
+    dpi=300,
+
+    bbox_inches="tight"
+)
+
+
+plt.close(
+    figure
+)
 
 # =============================================================================
 # 11. DEFINE IMPUTATION COMPARISONS
