@@ -1,0 +1,4 @@
+scenario,strategy,model,input_condition,classification_parameters,classification_best_epoch,balanced_accuracy,sensitivity,specificity,regression_parameters,regression_best_epoch,rmse,mae,r2
+Group-specific + MCAR,Direct LongGCN,LongGCN,group_specific_mcar,489,84,0.5569727353238867,0.8522267206477733,0.26171875,489,70,2.475142531718296,1.9862513045445085,0.1332176627595456
+Group-specific + MCAR,MICE3D repair MCAR + LongGCN,LongGCN,group_specific_mcar_to_group_specific,489,36,0.6042035678137652,0.8724696356275303,0.3359375,489,213,2.354702764635403,1.8681154885267215,0.2155201109809607
+Group-specific + MCAR,MICE3D + Deep ReLU,Deep ReLU,group_specific_mcar_to_complete,345,116,0.6476151315789473,0.8421052631578947,0.453125,345,51,2.3021599341718337,1.8331425729567803,0.2501392709037378

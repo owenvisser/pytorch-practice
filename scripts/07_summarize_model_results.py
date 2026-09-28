@@ -1,60 +1,173 @@
 """
-Summarize LongGCN Model Results
-===============================
+Summarize Missing-Data Strategy Results
+=======================================
 
-This script summarizes the model-fitting results produced by:
+This script summarizes the primary scientific comparison for the LongGCN
+simulation study.
 
-    scripts/06_run_longgcn_models.py
+The central comparison is NOT:
 
-The primary goal is to compare predictive performance across the eight
-missing-data and imputation conditions.
+    LongGCN on completed data
+        versus
+    Deep ReLU on the same completed data
 
-The script produces:
+because LongGCN is intended primarily for settings in which the longitudinal
+measurement record is incomplete or structurally heterogeneous.
 
-    1. Classification balanced-accuracy plot
+Instead, the primary comparison is:
 
-    2. Classification sensitivity/specificity plot
-
-    3. Regression RMSE plot
-
-    4. Regression R-squared plot
-
-    5. Classification imputation-gain plot
-
-    6. Regression imputation-gain plot
-
-    7. Combined model comparison table
-
-    8. Pairwise imputation comparison table
+    incomplete longitudinal data
+        |
+        |-----------------------------|
+        |                             |
+        v                             v
+    Direct LongGCN                  MICE3D
+                                      |
+                                      v
+                                  Deep ReLU
 
 
-Interpretation of the imputation-gain plots
--------------------------------------------
+The three primary starting-data scenarios are:
+
+    1. MCAR
+
+       Direct strategy:
+           MCAR -> LongGCN
+
+       Conventional strategy:
+           MCAR -> MICE3D -> complete data -> Deep ReLU
+
+
+    2. Group-specific observation
+
+       Direct strategy:
+           Group-specific -> LongGCN
+
+       Conventional strategy:
+           Group-specific -> MICE3D -> complete data -> Deep ReLU
+
+
+    3. Group-specific observation + MCAR
+
+       Direct strategy:
+           Group-specific + MCAR -> LongGCN
+
+       Conventional strategy:
+           Group-specific + MCAR -> MICE3D -> complete data -> Deep ReLU
+
+       An additional selective-repair strategy is also retained:
+
+           Group-specific + MCAR
+               -> MICE3D
+               -> restore structural group missingness
+               -> LongGCN
+
+
+Why retain the selective-repair strategy?
+-----------------------------------------
+
+The selective-repair strategy asks a scientifically different question:
+
+    Can accidental missingness be repaired while preserving the designed
+    measurement-group structure that motivated LongGCN?
+
+This produces three strategies for the Group-specific + MCAR condition:
+
+    1. Direct LongGCN
+
+    2. MICE3D repairs accidental MCAR only
+       -> restore structural missingness
+       -> LongGCN
+
+    3. MICE3D fills everything
+       -> Deep ReLU
+
+
+Primary metrics
+---------------
 
 Classification:
-
-    gain =
-        balanced accuracy after imputation
-        -
-        balanced accuracy without imputation
+    balanced accuracy
+    sensitivity
+    specificity
 
 Regression:
+    RMSE
+    MAE
+    R^2
 
-    gain =
-        RMSE without imputation
+
+Comparison-direction convention
+-------------------------------
+
+For classification:
+
+    conventional_balanced_accuracy_gain
+        =
+        BA(MICE3D + Deep ReLU)
         -
-        RMSE after imputation
+        BA(Direct LongGCN)
 
-Therefore, for BOTH plots:
+Positive values favor MICE3D + Deep ReLU.
 
-    positive values
-        imputation improved prediction
 
-    zero
-        essentially no predictive difference
+For regression:
 
-    negative values
-        imputation reduced predictive performance
+    conventional_rmse_gain
+        =
+        RMSE(Direct LongGCN)
+        -
+        RMSE(MICE3D + Deep ReLU)
+
+Positive values favor MICE3D + Deep ReLU because lower RMSE is better.
+
+
+Validation-loss curves
+----------------------
+
+The script also creates full validation-loss curves using every saved epoch.
+
+Different line endpoints therefore display early stopping directly.
+
+Within those figures:
+
+    color
+        identifies the original missing-data scenario
+
+    solid line
+        Direct LongGCN
+
+    dashed line
+        MICE3D + Deep ReLU
+
+    dotted line
+        selective MICE3D repair + LongGCN
+        for Group-specific + MCAR only
+
+
+Expected input files
+--------------------
+
+    results/
+        longgcn_model_results.csv
+        deep_relu_model_results.csv
+
+        classification/
+            <condition>/
+                training_history.csv
+
+        regression/
+            <condition>/
+                training_history.csv
+
+        deep_relu/
+            classification/
+                <condition>/
+                    training_history.csv
+
+            regression/
+                <condition>/
+                    training_history.csv
 
 
 Run from the PyTorch-Practice project root using:
@@ -65,9 +178,9 @@ Run from the PyTorch-Practice project root using:
 
 from pathlib import Path
 
-import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import matplotlib.pyplot as plt
 
 
 # =============================================================================
@@ -82,7 +195,6 @@ PROJECT_ROOT = (
 
 
 RESULTS_DIRECTORY = (
-
     PROJECT_ROOT
     /
     "results"
@@ -90,7 +202,6 @@ RESULTS_DIRECTORY = (
 
 
 FIGURE_DIRECTORY = (
-
     RESULTS_DIRECTORY
     /
     "figures"
@@ -103,256 +214,1087 @@ FIGURE_DIRECTORY.mkdir(
 )
 
 
-RESULTS_PATH = (
-
+LONGGCN_RESULTS_PATH = (
     RESULTS_DIRECTORY
     /
     "longgcn_model_results.csv"
 )
 
 
+DEEP_RELU_RESULTS_PATH = (
+    RESULTS_DIRECTORY
+    /
+    "deep_relu_model_results.csv"
+)
+
+
 # =============================================================================
-# 2. CONDITION ORDER
+# 2. OUTPUT PATHS
 # =============================================================================
 
-# This order reflects the scientific comparisons rather than alphabetical
-# ordering.
+STRATEGY_LEVEL_RESULTS_PATH = (
+    RESULTS_DIRECTORY
+    /
+    "strategy_level_results.csv"
+)
 
-CONDITION_ORDER = [
 
-    "complete",
+PRIMARY_COMPARISON_PATH = (
+    RESULTS_DIRECTORY
+    /
+    "primary_strategy_comparison.csv"
+)
 
-    "mcar",
 
-    "mcar_to_complete",
+GROUP_MCAR_COMPARISON_PATH = (
+    RESULTS_DIRECTORY
+    /
+    "group_mcar_three_strategy_comparison.csv"
+)
 
-    "group_specific",
 
-    "group_specific_to_complete",
+# =============================================================================
+# 3. SCIENTIFIC COMPARISON DEFINITIONS
+# =============================================================================
 
-    "group_specific_mcar",
+PRIMARY_SCENARIOS = [
 
-    "group_specific_mcar_to_group_specific",
+    {
+        "scenario":
+            "MCAR",
 
-    "group_specific_mcar_to_complete"
+        "direct_longgcn_condition":
+            "mcar",
+
+        "mice3d_deep_relu_condition":
+            "mcar_to_complete"
+    },
+
+    {
+        "scenario":
+            "Group-specific",
+
+        "direct_longgcn_condition":
+            "group_specific",
+
+        "mice3d_deep_relu_condition":
+            "group_specific_to_complete"
+    },
+
+    {
+        "scenario":
+            "Group-specific + MCAR",
+
+        "direct_longgcn_condition":
+            "group_specific_mcar",
+
+        "mice3d_deep_relu_condition":
+            "group_specific_mcar_to_complete"
+    }
 ]
 
 
-# =============================================================================
-# 3. DISPLAY LABELS
-# =============================================================================
+# This is the special condition in which MICE3D repairs accidental MCAR
+# missingness but the original structural group missingness is restored.
 
-CONDITION_LABELS = {
+SELECTIVE_REPAIR_CONDITION = (
+    "group_specific_mcar_to_group_specific"
+)
 
-    "complete":
-        "Complete",
 
-    "mcar":
-        "MCAR",
+# Labels used throughout tables and figures.
 
-    "mcar_to_complete":
-        "MCAR → Complete",
+DIRECT_STRATEGY_LABEL = (
+    "Direct LongGCN"
+)
 
-    "group_specific":
-        "Group-specific",
 
-    "group_specific_to_complete":
-        "Group-specific → Complete",
+CONVENTIONAL_STRATEGY_LABEL = (
+    "MICE3D + Deep ReLU"
+)
 
-    "group_specific_mcar":
-        "Group-specific + MCAR",
 
-    "group_specific_mcar_to_group_specific":
-        "Group + MCAR → Group-specific",
-
-    "group_specific_mcar_to_complete":
-        "Group + MCAR → Complete"
-}
+SELECTIVE_REPAIR_LABEL = (
+    "MICE3D repair MCAR + LongGCN"
+)
 
 
 # =============================================================================
-# LOAD TRAINING HISTORY
+# 4. LOAD MODEL RESULT FILES
 # =============================================================================
 
-def load_training_history(
-    task,
-    condition
+def load_results(
+    path,
+    result_name
 ):
     """
-    Load the complete epoch-level training history for one fitted model.
+    Load one model-result CSV and verify required columns.
+
+    Parameters
+    ----------
+    path : pathlib.Path
+        Path to the result CSV.
+
+    result_name : str
+        Human-readable name used in error messages.
+
+    Returns
+    -------
+    results : pandas.DataFrame
+        Loaded result table.
     """
 
-    history_path = (
-
-        RESULTS_DIRECTORY
-
-        /
-
-        task
-
-        /
-
-        condition
-
-        /
-
-        "training_history.csv"
-    )
-
-
-    if not history_path.exists():
+    if not path.exists():
 
         raise FileNotFoundError(
-
-            "Training history was not found:\n"
-            f"{history_path}"
+            f"{result_name} was not found:\n"
+            f"{path}"
         )
 
 
-    training_history = pd.read_csv(
-        history_path
+    results = pd.read_csv(
+        path
     )
 
 
-    return training_history
+    required_columns = {
 
-# =============================================================================
-# 4. LOAD RESULTS
-# =============================================================================
+        "condition",
+        "task",
+        "total_parameters",
+        "best_epoch",
+        "best_validation_loss",
+        "test_loss"
+    }
 
-if not RESULTS_PATH.exists():
 
-    raise FileNotFoundError(
+    missing_columns = (
 
-        "Combined model results were not found:\n"
-        f"{RESULTS_PATH}"
+        required_columns
+
+        -
+
+        set(
+            results.columns
+        )
     )
 
 
-results = pd.read_csv(
-    RESULTS_PATH
+    if missing_columns:
+
+        raise ValueError(
+            f"{result_name} is missing required columns: "
+            f"{sorted(missing_columns)}"
+        )
+
+
+    return results
+
+
+longgcn_results = load_results(
+
+    path=LONGGCN_RESULTS_PATH,
+
+    result_name="LongGCN results"
+)
+
+
+deep_relu_results = load_results(
+
+    path=DEEP_RELU_RESULTS_PATH,
+
+    result_name="Deep ReLU results"
 )
 
 
 # =============================================================================
-# 5. SPLIT CLASSIFICATION AND REGRESSION RESULTS
+# 5. ACCESS ONE MODEL RESULT
 # =============================================================================
 
-classification_results = (
+def get_result_row(
+    results,
+    condition,
+    task
+):
+    """
+    Return exactly one result row for a condition/task combination.
+    """
 
-    results[
-        results["task"]
-        ==
-        "classification"
+    matching_rows = results[
+
+        (
+            results[
+                "condition"
+            ]
+            ==
+            condition
+        )
+
+        &
+
+        (
+            results[
+                "task"
+            ]
+            ==
+            task
+        )
     ]
-    .copy()
-)
 
 
-regression_results = (
+    if len(
+        matching_rows
+    ) != 1:
 
-    results[
-        results["task"]
-        ==
-        "regression"
+        raise ValueError(
+
+            "Expected exactly one result row for:\n"
+
+            f"    condition = {condition}\n"
+
+            f"    task      = {task}\n"
+
+            f"but found {len(matching_rows)} rows."
+        )
+
+
+    return matching_rows.iloc[
+        0
     ]
-    .copy()
-)
 
 
 # =============================================================================
-# 6. APPLY CONDITION ORDER
+# 6. BUILD TIDY STRATEGY-LEVEL RESULTS
 # =============================================================================
 
-for data in [
-    classification_results,
-    regression_results
-]:
+def build_strategy_level_results():
+    """
+    Create one row per scenario / strategy combination.
 
-    data["condition"] = pd.Categorical(
+    Primary scenarios receive two rows:
 
-        data["condition"],
+        Direct LongGCN
+        MICE3D + Deep ReLU
 
-        categories=CONDITION_ORDER,
+    Group-specific + MCAR receives a third row:
+
+        MICE3D repair MCAR + LongGCN
+    """
+
+    rows = []
+
+
+    # =========================================================================
+    # PRIMARY TWO-STRATEGY COMPARISONS
+    # =========================================================================
+
+    for scenario_definition in PRIMARY_SCENARIOS:
+
+        scenario = (
+            scenario_definition[
+                "scenario"
+            ]
+        )
+
+
+        direct_condition = (
+            scenario_definition[
+                "direct_longgcn_condition"
+            ]
+        )
+
+
+        conventional_condition = (
+            scenario_definition[
+                "mice3d_deep_relu_condition"
+            ]
+        )
+
+
+        # ---------------------------------------------------------------------
+        # DIRECT LONGGCN: CLASSIFICATION
+        # ---------------------------------------------------------------------
+
+        direct_classification = get_result_row(
+
+            results=longgcn_results,
+
+            condition=direct_condition,
+
+            task="classification"
+        )
+
+
+        # ---------------------------------------------------------------------
+        # DIRECT LONGGCN: REGRESSION
+        # ---------------------------------------------------------------------
+
+        direct_regression = get_result_row(
+
+            results=longgcn_results,
+
+            condition=direct_condition,
+
+            task="regression"
+        )
+
+
+        # ---------------------------------------------------------------------
+        # SAVE DIRECT LONGGCN ROW
+        # ---------------------------------------------------------------------
+
+        rows.append(
+
+            {
+
+                "scenario":
+                    scenario,
+
+                "strategy":
+                    DIRECT_STRATEGY_LABEL,
+
+                "model":
+                    "LongGCN",
+
+                "input_condition":
+                    direct_condition,
+
+                "classification_parameters":
+                    direct_classification[
+                        "total_parameters"
+                    ],
+
+                "classification_best_epoch":
+                    direct_classification[
+                        "best_epoch"
+                    ],
+
+                "balanced_accuracy":
+                    direct_classification[
+                        "balanced_accuracy"
+                    ],
+
+                "sensitivity":
+                    direct_classification[
+                        "sensitivity"
+                    ],
+
+                "specificity":
+                    direct_classification[
+                        "specificity"
+                    ],
+
+                "regression_parameters":
+                    direct_regression[
+                        "total_parameters"
+                    ],
+
+                "regression_best_epoch":
+                    direct_regression[
+                        "best_epoch"
+                    ],
+
+                "rmse":
+                    direct_regression[
+                        "rmse"
+                    ],
+
+                "mae":
+                    direct_regression[
+                        "mae"
+                    ],
+
+                "r2":
+                    direct_regression[
+                        "r2"
+                    ]
+            }
+        )
+
+
+        # ---------------------------------------------------------------------
+        # MICE3D + DEEP RELU: CLASSIFICATION
+        # ---------------------------------------------------------------------
+
+        conventional_classification = get_result_row(
+
+            results=deep_relu_results,
+
+            condition=conventional_condition,
+
+            task="classification"
+        )
+
+
+        # ---------------------------------------------------------------------
+        # MICE3D + DEEP RELU: REGRESSION
+        # ---------------------------------------------------------------------
+
+        conventional_regression = get_result_row(
+
+            results=deep_relu_results,
+
+            condition=conventional_condition,
+
+            task="regression"
+        )
+
+
+        # ---------------------------------------------------------------------
+        # SAVE MICE3D + DEEP RELU ROW
+        # ---------------------------------------------------------------------
+
+        rows.append(
+
+            {
+
+                "scenario":
+                    scenario,
+
+                "strategy":
+                    CONVENTIONAL_STRATEGY_LABEL,
+
+                "model":
+                    "Deep ReLU",
+
+                "input_condition":
+                    conventional_condition,
+
+                "classification_parameters":
+                    conventional_classification[
+                        "total_parameters"
+                    ],
+
+                "classification_best_epoch":
+                    conventional_classification[
+                        "best_epoch"
+                    ],
+
+                "balanced_accuracy":
+                    conventional_classification[
+                        "balanced_accuracy"
+                    ],
+
+                "sensitivity":
+                    conventional_classification[
+                        "sensitivity"
+                    ],
+
+                "specificity":
+                    conventional_classification[
+                        "specificity"
+                    ],
+
+                "regression_parameters":
+                    conventional_regression[
+                        "total_parameters"
+                    ],
+
+                "regression_best_epoch":
+                    conventional_regression[
+                        "best_epoch"
+                    ],
+
+                "rmse":
+                    conventional_regression[
+                        "rmse"
+                    ],
+
+                "mae":
+                    conventional_regression[
+                        "mae"
+                    ],
+
+                "r2":
+                    conventional_regression[
+                        "r2"
+                    ]
+            }
+        )
+
+
+    # =========================================================================
+    # SELECTIVE REPAIR FOR GROUP-SPECIFIC + MCAR
+    # =========================================================================
+
+    selective_classification = get_result_row(
+
+        results=longgcn_results,
+
+        condition=SELECTIVE_REPAIR_CONDITION,
+
+        task="classification"
+    )
+
+
+    selective_regression = get_result_row(
+
+        results=longgcn_results,
+
+        condition=SELECTIVE_REPAIR_CONDITION,
+
+        task="regression"
+    )
+
+
+    rows.append(
+
+        {
+
+            "scenario":
+                "Group-specific + MCAR",
+
+            "strategy":
+                SELECTIVE_REPAIR_LABEL,
+
+            "model":
+                "LongGCN",
+
+            "input_condition":
+                SELECTIVE_REPAIR_CONDITION,
+
+            "classification_parameters":
+                selective_classification[
+                    "total_parameters"
+                ],
+
+            "classification_best_epoch":
+                selective_classification[
+                    "best_epoch"
+                ],
+
+            "balanced_accuracy":
+                selective_classification[
+                    "balanced_accuracy"
+                ],
+
+            "sensitivity":
+                selective_classification[
+                    "sensitivity"
+                ],
+
+            "specificity":
+                selective_classification[
+                    "specificity"
+                ],
+
+            "regression_parameters":
+                selective_regression[
+                    "total_parameters"
+                ],
+
+            "regression_best_epoch":
+                selective_regression[
+                    "best_epoch"
+                ],
+
+            "rmse":
+                selective_regression[
+                    "rmse"
+                ],
+
+            "mae":
+                selective_regression[
+                    "mae"
+                ],
+
+            "r2":
+                selective_regression[
+                    "r2"
+                ]
+        }
+    )
+
+
+    strategy_results = pd.DataFrame(
+        rows
+    )
+
+
+    # -------------------------------------------------------------------------
+    # DEFINE DISPLAY ORDER
+    # -------------------------------------------------------------------------
+
+    scenario_order = [
+
+        "MCAR",
+
+        "Group-specific",
+
+        "Group-specific + MCAR"
+    ]
+
+
+    strategy_order = [
+
+        DIRECT_STRATEGY_LABEL,
+
+        SELECTIVE_REPAIR_LABEL,
+
+        CONVENTIONAL_STRATEGY_LABEL
+    ]
+
+
+    strategy_results[
+        "scenario"
+    ] = pd.Categorical(
+
+        strategy_results[
+            "scenario"
+        ],
+
+        categories=scenario_order,
 
         ordered=True
     )
 
 
-    data.sort_values(
-        "condition",
+    strategy_results[
+        "strategy"
+    ] = pd.Categorical(
+
+        strategy_results[
+            "strategy"
+        ],
+
+        categories=strategy_order,
+
+        ordered=True
+    )
+
+
+    strategy_results.sort_values(
+
+        [
+            "scenario",
+            "strategy"
+        ],
+
         inplace=True
     )
 
 
-    data["condition_label"] = (
+    strategy_results.reset_index(
 
-        data["condition"]
-        .astype(str)
-        .map(
-            CONDITION_LABELS
-        )
+        drop=True,
+
+        inplace=True
     )
 
 
+    return strategy_results
+
+
+strategy_level_results = (
+    build_strategy_level_results()
+)
+
+
+strategy_level_results.to_csv(
+
+    STRATEGY_LEVEL_RESULTS_PATH,
+
+    index=False
+)
+
+
 # =============================================================================
-# HELPER: ADD VALUE LABELS TO HORIZONTAL BARS
+# 7. BUILD PRIMARY DIRECT VS CONVENTIONAL COMPARISON
 # =============================================================================
 
-def label_horizontal_bars(
-    axis,
-    number_format=".3f"
+def build_primary_comparison(
+    strategy_results
 ):
     """
-    Place numerical values at the end of horizontal bars.
+    Create one comparison row per starting incomplete-data scenario.
+
+    Positive gain values indicate better performance for:
+
+        MICE3D + Deep ReLU.
     """
 
-    for bar in axis.patches:
+    rows = []
 
-        width = bar.get_width()
+
+    for scenario_definition in PRIMARY_SCENARIOS:
+
+        scenario = (
+            scenario_definition[
+                "scenario"
+            ]
+        )
+
+
+        scenario_rows = strategy_results[
+
+            strategy_results[
+                "scenario"
+            ]
+            ==
+            scenario
+        ]
+
+
+        direct_row = scenario_rows[
+
+            scenario_rows[
+                "strategy"
+            ]
+            ==
+            DIRECT_STRATEGY_LABEL
+
+        ].iloc[
+            0
+        ]
+
+
+        conventional_row = scenario_rows[
+
+            scenario_rows[
+                "strategy"
+            ]
+            ==
+            CONVENTIONAL_STRATEGY_LABEL
+
+        ].iloc[
+            0
+        ]
+
+
+        rows.append(
+
+            {
+
+                "scenario":
+                    scenario,
+
+                # =============================================================
+                # CLASSIFICATION
+                # =============================================================
+
+                "direct_longgcn_balanced_accuracy":
+                    direct_row[
+                        "balanced_accuracy"
+                    ],
+
+                "mice3d_deep_relu_balanced_accuracy":
+                    conventional_row[
+                        "balanced_accuracy"
+                    ],
+
+                "conventional_balanced_accuracy_gain":
+                    (
+                        conventional_row[
+                            "balanced_accuracy"
+                        ]
+                        -
+                        direct_row[
+                            "balanced_accuracy"
+                        ]
+                    ),
+
+                "direct_longgcn_sensitivity":
+                    direct_row[
+                        "sensitivity"
+                    ],
+
+                "mice3d_deep_relu_sensitivity":
+                    conventional_row[
+                        "sensitivity"
+                    ],
+
+                "direct_longgcn_specificity":
+                    direct_row[
+                        "specificity"
+                    ],
+
+                "mice3d_deep_relu_specificity":
+                    conventional_row[
+                        "specificity"
+                    ],
+
+                # =============================================================
+                # REGRESSION
+                # =============================================================
+
+                "direct_longgcn_rmse":
+                    direct_row[
+                        "rmse"
+                    ],
+
+                "mice3d_deep_relu_rmse":
+                    conventional_row[
+                        "rmse"
+                    ],
+
+                "conventional_rmse_gain":
+                    (
+                        direct_row[
+                            "rmse"
+                        ]
+                        -
+                        conventional_row[
+                            "rmse"
+                        ]
+                    ),
+
+                "direct_longgcn_mae":
+                    direct_row[
+                        "mae"
+                    ],
+
+                "mice3d_deep_relu_mae":
+                    conventional_row[
+                        "mae"
+                    ],
+
+                "direct_longgcn_r2":
+                    direct_row[
+                        "r2"
+                    ],
+
+                "mice3d_deep_relu_r2":
+                    conventional_row[
+                        "r2"
+                    ],
+
+                # =============================================================
+                # MODEL SIZE
+                # =============================================================
+
+                "direct_classification_parameters":
+                    direct_row[
+                        "classification_parameters"
+                    ],
+
+                "conventional_classification_parameters":
+                    conventional_row[
+                        "classification_parameters"
+                    ]
+            }
+        )
+
+
+    return pd.DataFrame(
+        rows
+    )
+
+
+primary_comparison = build_primary_comparison(
+
+    strategy_level_results
+)
+
+
+primary_comparison.to_csv(
+
+    PRIMARY_COMPARISON_PATH,
+
+    index=False
+)
+
+
+# =============================================================================
+# 8. GROUP + MCAR THREE-STRATEGY COMPARISON
+# =============================================================================
+
+group_mcar_comparison = (
+
+    strategy_level_results[
+
+        strategy_level_results[
+            "scenario"
+        ]
+        ==
+        "Group-specific + MCAR"
+    ]
+
+    .copy()
+)
+
+
+group_mcar_comparison.to_csv(
+
+    GROUP_MCAR_COMPARISON_PATH,
+
+    index=False
+)
+
+
+# =============================================================================
+# 9. PLOTTING HELPERS
+# =============================================================================
+
+def add_value_labels_horizontal(
+    axis,
+    bars,
+    decimals=3,
+    padding_fraction=0.01
+):
+    """
+    Add numeric labels immediately to the right of horizontal bars.
+    """
+
+    x_minimum, x_maximum = (
+        axis.get_xlim()
+    )
+
+
+    padding = (
+
+        (
+            x_maximum
+            -
+            x_minimum
+        )
+
+        *
+
+        padding_fraction
+    )
+
+
+    for bar in bars:
+
+        value = bar.get_width()
 
 
         axis.text(
 
-            width,
+            value
+            +
+            padding,
 
             bar.get_y()
             +
             bar.get_height() / 2,
 
-            f" {width:{number_format}}",
+            f"{value:.{decimals}f}",
 
-            va="center"
+            va="center",
+
+            ha="left",
+
+            clip_on=False
         )
 
 
+def save_figure(
+    figure,
+    filename,
+    right_margin=0.82
+):
+    """
+    Apply a consistent layout and save one figure.
+    """
+
+    figure.tight_layout(
+
+        rect=[
+            0,
+            0,
+            right_margin,
+            1
+        ]
+    )
+
+
+    figure.savefig(
+
+        FIGURE_DIRECTORY
+        /
+        filename,
+
+        dpi=300,
+
+        bbox_inches="tight"
+    )
+
+
+    plt.close(
+        figure
+    )
+
+
 # =============================================================================
-# 7. CLASSIFICATION: BALANCED ACCURACY
+# 10. PRIMARY CLASSIFICATION COMPARISON
 # =============================================================================
 
+scenario_labels = (
+
+    primary_comparison[
+        "scenario"
+    ]
+
+    .tolist()
+)
+
+
+positions = np.arange(
+
+    len(
+        scenario_labels
+    )
+)
+
+
+bar_height = 0.34
+
+
 figure, axis = plt.subplots(
+
     figsize=(
-        10,
+        11,
         6
     )
 )
 
 
-axis.barh(
+direct_bars = axis.barh(
 
-    classification_results[
-        "condition_label"
+    positions
+    -
+    bar_height / 2,
+
+    primary_comparison[
+        "direct_longgcn_balanced_accuracy"
     ],
 
-    classification_results[
-        "balanced_accuracy"
-    ]
+    height=bar_height,
+
+    label=DIRECT_STRATEGY_LABEL
+)
+
+
+conventional_bars = axis.barh(
+
+    positions
+    +
+    bar_height / 2,
+
+    primary_comparison[
+        "mice3d_deep_relu_balanced_accuracy"
+    ],
+
+    height=bar_height,
+
+    label=CONVENTIONAL_STRATEGY_LABEL
+)
+
+
+axis.set_yticks(
+    positions
+)
+
+
+axis.set_yticklabels(
+    scenario_labels
 )
 
 
 axis.set_xlim(
     0,
-    1
+    1.05
 )
 
 
@@ -367,43 +1309,68 @@ axis.set_ylabel(
 
 
 axis.set_title(
-    "Classification Performance"
+    "Classification: Direct LongGCN vs MICE3D + Deep ReLU"
 )
 
 
 axis.invert_yaxis()
 
 
-label_horizontal_bars(
-    axis
+axis.grid(
+
+    axis="x",
+
+    alpha=0.25
 )
 
 
-figure.tight_layout()
+axis.legend(
 
+    loc="center left",
 
-figure.savefig(
+    bbox_to_anchor=(
+        1.02,
+        0.5
+    ),
 
-    FIGURE_DIRECTORY
-    /
-    "classification_balanced_accuracy.png",
-
-    dpi=300,
-
-    bbox_inches="tight"
+    frameon=False
 )
 
 
-plt.close(
-    figure
+add_value_labels_horizontal(
+
+    axis=axis,
+
+    bars=direct_bars
+)
+
+
+add_value_labels_horizontal(
+
+    axis=axis,
+
+    bars=conventional_bars
+)
+
+
+save_figure(
+
+    figure=figure,
+
+    filename=(
+        "classification_primary_strategy_comparison.png"
+    ),
+
+    right_margin=0.78
 )
 
 
 # =============================================================================
-# 8. CLASSIFICATION: SENSITIVITY AND SPECIFICITY
+# 11. PRIMARY REGRESSION COMPARISON
 # =============================================================================
 
 figure, axis = plt.subplots(
+
     figsize=(
         11,
         6
@@ -411,45 +1378,35 @@ figure, axis = plt.subplots(
 )
 
 
-positions = np.arange(
-    len(
-        classification_results
-    )
-)
-
-
-bar_height = 0.35
-
-
-axis.barh(
+direct_bars = axis.barh(
 
     positions
     -
     bar_height / 2,
 
-    classification_results[
-        "sensitivity"
+    primary_comparison[
+        "direct_longgcn_rmse"
     ],
 
     height=bar_height,
 
-    label="Sensitivity"
+    label=DIRECT_STRATEGY_LABEL
 )
 
 
-axis.barh(
+conventional_bars = axis.barh(
 
     positions
     +
     bar_height / 2,
 
-    classification_results[
-        "specificity"
+    primary_comparison[
+        "mice3d_deep_relu_rmse"
     ],
 
     height=bar_height,
 
-    label="Specificity"
+    label=CONVENTIONAL_STRATEGY_LABEL
 )
 
 
@@ -459,76 +1416,7 @@ axis.set_yticks(
 
 
 axis.set_yticklabels(
-
-    classification_results[
-        "condition_label"
-    ]
-)
-
-
-axis.set_xlim(
-    0,
-    1
-)
-
-
-axis.set_xlabel(
-    "Classification Rate"
-)
-
-
-axis.set_title(
-    "Classification Sensitivity and Specificity"
-)
-
-
-axis.legend()
-
-
-axis.invert_yaxis()
-
-
-figure.tight_layout()
-
-
-figure.savefig(
-
-    FIGURE_DIRECTORY
-    /
-    "classification_sensitivity_specificity.png",
-
-    dpi=300,
-
-    bbox_inches="tight"
-)
-
-
-plt.close(
-    figure
-)
-
-
-# =============================================================================
-# 9. REGRESSION: RMSE
-# =============================================================================
-
-figure, axis = plt.subplots(
-    figsize=(
-        10,
-        6
-    )
-)
-
-
-axis.barh(
-
-    regression_results[
-        "condition_label"
-    ],
-
-    regression_results[
-        "rmse"
-    ]
+    scenario_labels
 )
 
 
@@ -543,59 +1431,362 @@ axis.set_ylabel(
 
 
 axis.set_title(
-    "Regression Performance"
+    "Regression: Direct LongGCN vs MICE3D + Deep ReLU"
 )
 
 
 axis.invert_yaxis()
 
 
-label_horizontal_bars(
-    axis
+axis.grid(
+
+    axis="x",
+
+    alpha=0.25
 )
 
 
-figure.tight_layout()
+axis.legend(
 
+    loc="center left",
 
-figure.savefig(
+    bbox_to_anchor=(
+        1.02,
+        0.5
+    ),
 
-    FIGURE_DIRECTORY
-    /
-    "regression_rmse.png",
-
-    dpi=300,
-
-    bbox_inches="tight"
+    frameon=False
 )
 
 
-plt.close(
-    figure
+add_value_labels_horizontal(
+
+    axis=axis,
+
+    bars=direct_bars
+)
+
+
+add_value_labels_horizontal(
+
+    axis=axis,
+
+    bars=conventional_bars
+)
+
+
+save_figure(
+
+    figure=figure,
+
+    filename=(
+        "regression_primary_strategy_comparison.png"
+    ),
+
+    right_margin=0.78
 )
 
 
 # =============================================================================
-# 10. REGRESSION: R-SQUARED
+# 12. CLASSIFICATION SENSITIVITY
 # =============================================================================
 
 figure, axis = plt.subplots(
+
     figsize=(
-        10,
+        11,
         6
     )
 )
 
 
-axis.barh(
+direct_bars = axis.barh(
 
-    regression_results[
-        "condition_label"
+    positions
+    -
+    bar_height / 2,
+
+    primary_comparison[
+        "direct_longgcn_sensitivity"
     ],
 
-    regression_results[
-        "r2"
-    ]
+    height=bar_height,
+
+    label=DIRECT_STRATEGY_LABEL
+)
+
+
+conventional_bars = axis.barh(
+
+    positions
+    +
+    bar_height / 2,
+
+    primary_comparison[
+        "mice3d_deep_relu_sensitivity"
+    ],
+
+    height=bar_height,
+
+    label=CONVENTIONAL_STRATEGY_LABEL
+)
+
+
+axis.set_yticks(
+    positions
+)
+
+
+axis.set_yticklabels(
+    scenario_labels
+)
+
+
+axis.set_xlim(
+    0,
+    1.05
+)
+
+
+axis.set_xlabel(
+    "Sensitivity"
+)
+
+
+axis.set_ylabel(
+    ""
+)
+
+
+axis.set_title(
+    "Classification Sensitivity by Missing-Data Strategy"
+)
+
+
+axis.invert_yaxis()
+
+
+axis.grid(
+
+    axis="x",
+
+    alpha=0.25
+)
+
+
+axis.legend(
+
+    loc="center left",
+
+    bbox_to_anchor=(
+        1.02,
+        0.5
+    ),
+
+    frameon=False
+)
+
+
+add_value_labels_horizontal(
+    axis,
+    direct_bars
+)
+
+
+add_value_labels_horizontal(
+    axis,
+    conventional_bars
+)
+
+
+save_figure(
+
+    figure=figure,
+
+    filename=(
+        "classification_primary_strategy_sensitivity.png"
+    ),
+
+    right_margin=0.78
+)
+
+
+# =============================================================================
+# 13. CLASSIFICATION SPECIFICITY
+# =============================================================================
+
+figure, axis = plt.subplots(
+
+    figsize=(
+        11,
+        6
+    )
+)
+
+
+direct_bars = axis.barh(
+
+    positions
+    -
+    bar_height / 2,
+
+    primary_comparison[
+        "direct_longgcn_specificity"
+    ],
+
+    height=bar_height,
+
+    label=DIRECT_STRATEGY_LABEL
+)
+
+
+conventional_bars = axis.barh(
+
+    positions
+    +
+    bar_height / 2,
+
+    primary_comparison[
+        "mice3d_deep_relu_specificity"
+    ],
+
+    height=bar_height,
+
+    label=CONVENTIONAL_STRATEGY_LABEL
+)
+
+
+axis.set_yticks(
+    positions
+)
+
+
+axis.set_yticklabels(
+    scenario_labels
+)
+
+
+axis.set_xlim(
+    0,
+    1.05
+)
+
+
+axis.set_xlabel(
+    "Specificity"
+)
+
+
+axis.set_ylabel(
+    ""
+)
+
+
+axis.set_title(
+    "Classification Specificity by Missing-Data Strategy"
+)
+
+
+axis.invert_yaxis()
+
+
+axis.grid(
+
+    axis="x",
+
+    alpha=0.25
+)
+
+
+axis.legend(
+
+    loc="center left",
+
+    bbox_to_anchor=(
+        1.02,
+        0.5
+    ),
+
+    frameon=False
+)
+
+
+add_value_labels_horizontal(
+    axis,
+    direct_bars
+)
+
+
+add_value_labels_horizontal(
+    axis,
+    conventional_bars
+)
+
+
+save_figure(
+
+    figure=figure,
+
+    filename=(
+        "classification_primary_strategy_specificity.png"
+    ),
+
+    right_margin=0.78
+)
+
+
+# =============================================================================
+# 14. REGRESSION R-SQUARED
+# =============================================================================
+
+figure, axis = plt.subplots(
+
+    figsize=(
+        11,
+        6
+    )
+)
+
+
+direct_bars = axis.barh(
+
+    positions
+    -
+    bar_height / 2,
+
+    primary_comparison[
+        "direct_longgcn_r2"
+    ],
+
+    height=bar_height,
+
+    label=DIRECT_STRATEGY_LABEL
+)
+
+
+conventional_bars = axis.barh(
+
+    positions
+    +
+    bar_height / 2,
+
+    primary_comparison[
+        "mice3d_deep_relu_r2"
+    ],
+
+    height=bar_height,
+
+    label=CONVENTIONAL_STRATEGY_LABEL
+)
+
+
+axis.set_yticks(
+    positions
+)
+
+
+axis.set_yticklabels(
+    scenario_labels
 )
 
 
@@ -610,15 +1801,187 @@ axis.set_ylabel(
 
 
 axis.set_title(
-    "Regression R²"
+    "Regression R² by Missing-Data Strategy"
 )
 
 
 axis.invert_yaxis()
 
 
-label_horizontal_bars(
-    axis
+axis.grid(
+
+    axis="x",
+
+    alpha=0.25
+)
+
+
+axis.legend(
+
+    loc="center left",
+
+    bbox_to_anchor=(
+        1.02,
+        0.5
+    ),
+
+    frameon=False
+)
+
+
+add_value_labels_horizontal(
+    axis,
+    direct_bars
+)
+
+
+add_value_labels_horizontal(
+    axis,
+    conventional_bars
+)
+
+
+save_figure(
+
+    figure=figure,
+
+    filename=(
+        "regression_primary_strategy_r2.png"
+    ),
+
+    right_margin=0.78
+)
+
+
+# =============================================================================
+# 15. GROUP + MCAR THREE-STRATEGY ORDER
+# =============================================================================
+
+GROUP_MCAR_STRATEGY_ORDER = [
+
+    DIRECT_STRATEGY_LABEL,
+
+    SELECTIVE_REPAIR_LABEL,
+
+    CONVENTIONAL_STRATEGY_LABEL
+]
+
+
+group_mcar_plot_data = (
+    group_mcar_comparison
+    .copy()
+)
+
+
+group_mcar_plot_data[
+    "strategy"
+] = pd.Categorical(
+
+    group_mcar_plot_data[
+        "strategy"
+    ],
+
+    categories=(
+        GROUP_MCAR_STRATEGY_ORDER
+    ),
+
+    ordered=True
+)
+
+
+group_mcar_plot_data.sort_values(
+
+    "strategy",
+
+    inplace=True
+)
+
+
+group_mcar_positions = np.arange(
+
+    len(
+        group_mcar_plot_data
+    )
+)
+
+
+# =============================================================================
+# 16. GROUP + MCAR THREE-STRATEGY CLASSIFICATION
+# =============================================================================
+
+figure, axis = plt.subplots(
+
+    figsize=(
+        11,
+        5.5
+    )
+)
+
+
+bars = axis.barh(
+
+    group_mcar_positions,
+
+    group_mcar_plot_data[
+        "balanced_accuracy"
+    ]
+)
+
+
+axis.set_yticks(
+    group_mcar_positions
+)
+
+
+axis.set_yticklabels(
+
+    group_mcar_plot_data[
+        "strategy"
+    ]
+
+    .astype(
+        str
+    )
+)
+
+
+axis.set_xlim(
+    0,
+    1.05
+)
+
+
+axis.set_xlabel(
+    "Balanced Accuracy"
+)
+
+
+axis.set_ylabel(
+    ""
+)
+
+
+axis.set_title(
+    "Group-specific + MCAR: Three Missing-Data Strategies"
+)
+
+
+axis.invert_yaxis()
+
+
+axis.grid(
+
+    axis="x",
+
+    alpha=0.25
+)
+
+
+add_value_labels_horizontal(
+
+    axis=axis,
+
+    bars=bars
 )
 
 
@@ -628,8 +1991,10 @@ figure.tight_layout()
 figure.savefig(
 
     FIGURE_DIRECTORY
+
     /
-    "regression_r2.png",
+
+    "classification_group_mcar_three_strategy_comparison.png",
 
     dpi=300,
 
@@ -641,95 +2006,82 @@ plt.close(
     figure
 )
 
+
 # =============================================================================
-# CLASSIFICATION: VALIDATION LOSS ACROSS EPOCHS
+# 17. GROUP + MCAR THREE-STRATEGY REGRESSION
 # =============================================================================
 
 figure, axis = plt.subplots(
+
     figsize=(
-        12,
-        7
+        11,
+        5.5
     )
 )
 
 
-for condition in CONDITION_ORDER:
+bars = axis.barh(
 
-    training_history = (
-        load_training_history(
+    group_mcar_positions,
 
-            task="classification",
+    group_mcar_plot_data[
+        "rmse"
+    ]
+)
 
-            condition=condition
-        )
+
+axis.set_yticks(
+    group_mcar_positions
+)
+
+
+axis.set_yticklabels(
+
+    group_mcar_plot_data[
+        "strategy"
+    ]
+
+    .astype(
+        str
     )
-
-
-    axis.plot(
-
-        training_history[
-            "epoch"
-        ],
-
-        training_history[
-            "validation_loss"
-        ],
-
-        label=(
-            CONDITION_LABELS[
-                condition
-            ]
-        ),
-
-        linewidth=1.8
-    )
+)
 
 
 axis.set_xlabel(
-    "Epoch"
+    "RMSE"
 )
 
 
 axis.set_ylabel(
-    "Validation Loss"
+    ""
 )
 
 
 axis.set_title(
-    "Classification Validation Loss During Training"
+    "Group-specific + MCAR: Three Missing-Data Strategies"
 )
 
 
+axis.invert_yaxis()
+
+
 axis.grid(
+
+    axis="x",
+
     alpha=0.25
 )
 
 
-# Place legend outside the plotting region.
+add_value_labels_horizontal(
 
-axis.legend(
+    axis=axis,
 
-    loc="center left",
-
-    bbox_to_anchor=(
-        1.02,
-        0.5
-    ),
-
-    frameon=False
+    bars=bars
 )
 
 
-# Reserve space on the right for the external legend.
-
-figure.tight_layout(
-    rect=[
-        0,
-        0,
-        0.78,
-        1
-    ]
-)
+figure.tight_layout()
 
 
 figure.savefig(
@@ -738,7 +2090,7 @@ figure.savefig(
 
     /
 
-    "classification_validation_loss.png",
+    "regression_group_mcar_three_strategy_comparison.png",
 
     dpi=300,
 
@@ -751,593 +2103,451 @@ plt.close(
 )
 
 
-
 # =============================================================================
-# REGRESSION: VALIDATION LOSS ACROSS EPOCHS
+# 18. LOAD EPOCH-LEVEL TRAINING HISTORY
 # =============================================================================
 
-figure, axis = plt.subplots(
-    figsize=(
-        12,
-        7
-    )
-)
+def load_training_history(
+    model_type,
+    task,
+    condition
+):
+    """
+    Load one complete epoch-level training history.
 
+    Parameters
+    ----------
+    model_type : str
+        Either:
 
-for condition in CONDITION_ORDER:
+            "longgcn"
+            "deep_relu"
 
-    training_history = (
-        load_training_history(
+    task : str
+        Either:
 
-            task="regression",
+            "classification"
+            "regression"
 
-            condition=condition
+    condition : str
+        Saved experimental condition.
+    """
+
+    # -------------------------------------------------------------------------
+    # LONGGCN
+    # -------------------------------------------------------------------------
+
+    if model_type == "longgcn":
+
+        history_path = (
+
+            RESULTS_DIRECTORY
+
+            /
+
+            task
+
+            /
+
+            condition
+
+            /
+
+            "training_history.csv"
         )
+
+
+    # -------------------------------------------------------------------------
+    # DEEP RELU
+    # -------------------------------------------------------------------------
+
+    elif model_type == "deep_relu":
+
+        history_path = (
+
+            RESULTS_DIRECTORY
+
+            /
+
+            "deep_relu"
+
+            /
+
+            task
+
+            /
+
+            condition
+
+            /
+
+            "training_history.csv"
+        )
+
+
+    else:
+
+        raise ValueError(
+            "model_type must be 'longgcn' or 'deep_relu'."
+        )
+
+
+    if not history_path.exists():
+
+        raise FileNotFoundError(
+
+            "Training history was not found:\n"
+
+            f"{history_path}"
+        )
+
+
+    history = pd.read_csv(
+        history_path
     )
 
 
-    axis.plot(
+    required_columns = {
 
-        training_history[
-            "epoch"
-        ],
+        "epoch",
 
-        training_history[
-            "validation_loss"
-        ],
-
-        label=(
-            CONDITION_LABELS[
-                condition
-            ]
-        ),
-
-        linewidth=1.8
-    )
-
-
-axis.set_xlabel(
-    "Epoch"
-)
-
-
-axis.set_ylabel(
-    "Validation Loss"
-)
-
-
-axis.set_title(
-    "Regression Validation Loss During Training"
-)
-
-
-axis.grid(
-    alpha=0.25
-)
-
-
-axis.legend(
-
-    loc="center left",
-
-    bbox_to_anchor=(
-        1.02,
-        0.5
-    ),
-
-    frameon=False
-)
-
-
-figure.tight_layout(
-    rect=[
-        0,
-        0,
-        0.78,
-        1
-    ]
-)
-
-
-figure.savefig(
-
-    FIGURE_DIRECTORY
-
-    /
-
-    "regression_validation_loss.png",
-
-    dpi=300,
-
-    bbox_inches="tight"
-)
-
-
-plt.close(
-    figure
-)
-
-# =============================================================================
-# 11. DEFINE IMPUTATION COMPARISONS
-# =============================================================================
-
-IMPUTATION_COMPARISONS = {
-
-    "MCAR → Complete": {
-
-        "observed":
-            "mcar",
-
-        "imputed":
-            "mcar_to_complete"
-    },
-
-
-    "Group-specific → Complete": {
-
-        "observed":
-            "group_specific",
-
-        "imputed":
-            "group_specific_to_complete"
-    },
-
-
-    "Group + MCAR → Group-specific": {
-
-        "observed":
-            "group_specific_mcar",
-
-        "imputed":
-            "group_specific_mcar_to_group_specific"
-    },
-
-
-    "Group + MCAR → Complete": {
-
-        "observed":
-            "group_specific_mcar",
-
-        "imputed":
-            "group_specific_mcar_to_complete"
+        "validation_loss"
     }
-}
 
 
-# =============================================================================
-# 12. CREATE IMPUTATION COMPARISON TABLE
-# =============================================================================
+    missing_columns = (
 
-imputation_rows = []
-
-
-for (
-    comparison_name,
-    comparison
-) in IMPUTATION_COMPARISONS.items():
-
-    observed_condition = (
-        comparison[
-            "observed"
-        ]
-    )
-
-
-    imputed_condition = (
-        comparison[
-            "imputed"
-        ]
-    )
-
-
-    # -------------------------------------------------------------------------
-    # CLASSIFICATION
-    # -------------------------------------------------------------------------
-
-    observed_classification = (
-
-        classification_results[
-            classification_results[
-                "condition"
-            ]
-            ==
-            observed_condition
-        ]
-        .iloc[0]
-    )
-
-
-    imputed_classification = (
-
-        classification_results[
-            classification_results[
-                "condition"
-            ]
-            ==
-            imputed_condition
-        ]
-        .iloc[0]
-    )
-
-
-    classification_gain = (
-
-        imputed_classification[
-            "balanced_accuracy"
-        ]
+        required_columns
 
         -
 
-        observed_classification[
-            "balanced_accuracy"
+        set(
+            history.columns
+        )
+    )
+
+
+    if missing_columns:
+
+        raise ValueError(
+
+            f"{history_path} is missing required columns: "
+
+            f"{sorted(missing_columns)}"
+        )
+
+
+    return history
+
+
+# =============================================================================
+# 19. PLOT VALIDATION-LOSS STRATEGY COMPARISON
+# =============================================================================
+
+def plot_validation_loss_comparison(
+    task,
+    output_filename,
+    title
+):
+    """
+    Plot complete validation-loss histories for the relevant strategies.
+
+    Color identifies the starting missing-data scenario.
+
+    Solid line:
+        Direct LongGCN
+
+    Dashed line:
+        MICE3D + Deep ReLU
+
+    Dotted line:
+        MICE3D repairs accidental MCAR + LongGCN
+        for Group-specific + MCAR only.
+
+    Because every saved epoch is shown, early stopping is visible from the
+    endpoint of each line.
+    """
+
+    figure, axis = plt.subplots(
+
+        figsize=(
+            13,
+            7
+        )
+    )
+
+
+    color_cycle = (
+
+        plt.rcParams[
+            "axes.prop_cycle"
+        ]
+
+        .by_key()[
+
+            "color"
         ]
     )
 
 
-    # -------------------------------------------------------------------------
-    # REGRESSION
-    # -------------------------------------------------------------------------
+    # =========================================================================
+    # PRIMARY DIRECT VS CONVENTIONAL STRATEGIES
+    # =========================================================================
 
-    observed_regression = (
+    for scenario_index, scenario_definition in enumerate(
 
-        regression_results[
-            regression_results[
-                "condition"
+        PRIMARY_SCENARIOS
+    ):
+
+        scenario = (
+            scenario_definition[
+                "scenario"
             ]
-            ==
-            observed_condition
+        )
+
+
+        color = color_cycle[
+
+            scenario_index
+
+            %
+
+            len(
+                color_cycle
+            )
         ]
-        .iloc[0]
+
+
+        # ---------------------------------------------------------------------
+        # DIRECT LONGGCN
+        # ---------------------------------------------------------------------
+
+        direct_history = load_training_history(
+
+            model_type="longgcn",
+
+            task=task,
+
+            condition=(
+                scenario_definition[
+                    "direct_longgcn_condition"
+                ]
+            )
+        )
+
+
+        axis.plot(
+
+            direct_history[
+                "epoch"
+            ],
+
+            direct_history[
+                "validation_loss"
+            ],
+
+            label=(
+
+                f"{scenario} — "
+                f"{DIRECT_STRATEGY_LABEL}"
+            ),
+
+            linewidth=1.8,
+
+            linestyle="-",
+
+            color=color
+        )
+
+
+        # ---------------------------------------------------------------------
+        # MICE3D + DEEP RELU
+        # ---------------------------------------------------------------------
+
+        conventional_history = load_training_history(
+
+            model_type="deep_relu",
+
+            task=task,
+
+            condition=(
+                scenario_definition[
+                    "mice3d_deep_relu_condition"
+                ]
+            )
+        )
+
+
+        axis.plot(
+
+            conventional_history[
+                "epoch"
+            ],
+
+            conventional_history[
+                "validation_loss"
+            ],
+
+            label=(
+
+                f"{scenario} — "
+                f"{CONVENTIONAL_STRATEGY_LABEL}"
+            ),
+
+            linewidth=1.8,
+
+            linestyle="--",
+
+            color=color
+        )
+
+
+    # =========================================================================
+    # SELECTIVE REPAIR STRATEGY
+    # =========================================================================
+
+    selective_history = load_training_history(
+
+        model_type="longgcn",
+
+        task=task,
+
+        condition=SELECTIVE_REPAIR_CONDITION
     )
 
 
-    imputed_regression = (
+    selective_color = color_cycle[
 
-        regression_results[
-            regression_results[
-                "condition"
-            ]
-            ==
-            imputed_condition
-        ]
-        .iloc[0]
-    )
+        2
 
+        %
 
-    # Positive means lower RMSE after imputation.
-
-    regression_gain = (
-
-        observed_regression[
-            "rmse"
-        ]
-
-        -
-
-        imputed_regression[
-            "rmse"
-        ]
-    )
-
-
-    imputation_rows.append({
-
-        "comparison":
-            comparison_name,
-
-        "observed_condition":
-            observed_condition,
-
-        "imputed_condition":
-            imputed_condition,
-
-        "observed_balanced_accuracy":
-            observed_classification[
-                "balanced_accuracy"
-            ],
-
-        "imputed_balanced_accuracy":
-            imputed_classification[
-                "balanced_accuracy"
-            ],
-
-        "balanced_accuracy_gain":
-            classification_gain,
-
-        "observed_rmse":
-            observed_regression[
-                "rmse"
-            ],
-
-        "imputed_rmse":
-            imputed_regression[
-                "rmse"
-            ],
-
-        "rmse_gain":
-            regression_gain
-    })
-
-
-imputation_summary = pd.DataFrame(
-    imputation_rows
-)
-
-
-imputation_summary.to_csv(
-
-    RESULTS_DIRECTORY
-    /
-    "imputation_comparison_summary.csv",
-
-    index=False
-)
-
-
-# =============================================================================
-# 13. CLASSIFICATION IMPUTATION GAIN
-# =============================================================================
-
-figure, axis = plt.subplots(
-    figsize=(
-        10,
-        5
-    )
-)
-
-
-axis.barh(
-
-    imputation_summary[
-        "comparison"
-    ],
-
-    imputation_summary[
-        "balanced_accuracy_gain"
+        len(
+            color_cycle
+        )
     ]
-)
 
 
-axis.axvline(
-    x=0,
-    linewidth=1
-)
+    axis.plot(
 
+        selective_history[
+            "epoch"
+        ],
 
-axis.set_xlabel(
-    "Change in Balanced Accuracy"
-)
+        selective_history[
+            "validation_loss"
+        ],
 
+        label=(
 
-axis.set_ylabel(
-    ""
-)
+            "Group-specific + MCAR — "
 
+            f"{SELECTIVE_REPAIR_LABEL}"
+        ),
 
-axis.set_title(
-    "Classification Gain from MICE3D Imputation"
-)
+        linewidth=1.8,
 
+        linestyle=":",
 
-axis.invert_yaxis()
-
-
-for bar in axis.patches:
-
-    value = bar.get_width()
-
-
-    axis.text(
-
-        value,
-
-        bar.get_y()
-        +
-        bar.get_height() / 2,
-
-        f" {value:+.3f}",
-
-        va="center"
+        color=selective_color
     )
 
 
-figure.tight_layout()
+    # =========================================================================
+    # PLOT FORMATTING
+    # =========================================================================
+
+    axis.set_xlabel(
+        "Epoch"
+    )
 
 
-figure.savefig(
-
-    FIGURE_DIRECTORY
-    /
-    "classification_imputation_gain.png",
-
-    dpi=300,
-
-    bbox_inches="tight"
-)
+    axis.set_ylabel(
+        "Validation Loss"
+    )
 
 
-plt.close(
-    figure
-)
+    axis.set_title(
+        title
+    )
+
+
+    axis.grid(
+        alpha=0.25
+    )
+
+
+    # Legend outside the plotting region on the right.
+
+    axis.legend(
+
+        loc="center left",
+
+        bbox_to_anchor=(
+            1.02,
+            0.5
+        ),
+
+        frameon=False
+    )
+
+
+    save_figure(
+
+        figure=figure,
+
+        filename=output_filename,
+
+        right_margin=0.68
+    )
 
 
 # =============================================================================
-# 14. REGRESSION IMPUTATION GAIN
+# 20. CLASSIFICATION VALIDATION LOSS
 # =============================================================================
 
-figure, axis = plt.subplots(
-    figsize=(
-        10,
-        5
+plot_validation_loss_comparison(
+
+    task="classification",
+
+    output_filename=(
+        "classification_validation_loss_strategy_comparison.png"
+    ),
+
+    title=(
+        "Classification Validation Loss by Missing-Data Strategy"
     )
 )
 
 
-axis.barh(
+# =============================================================================
+# 21. REGRESSION VALIDATION LOSS
+# =============================================================================
 
-    imputation_summary[
-        "comparison"
-    ],
+plot_validation_loss_comparison(
 
-    imputation_summary[
-        "rmse_gain"
-    ]
-)
+    task="regression",
 
+    output_filename=(
+        "regression_validation_loss_strategy_comparison.png"
+    ),
 
-axis.axvline(
-    x=0,
-    linewidth=1
-)
-
-
-axis.set_xlabel(
-    "Reduction in RMSE"
-)
-
-
-axis.set_ylabel(
-    ""
-)
-
-
-axis.set_title(
-    "Regression Gain from MICE3D Imputation"
-)
-
-
-axis.invert_yaxis()
-
-
-for bar in axis.patches:
-
-    value = bar.get_width()
-
-
-    axis.text(
-
-        value,
-
-        bar.get_y()
-        +
-        bar.get_height() / 2,
-
-        f" {value:+.3f}",
-
-        va="center"
+    title=(
+        "Regression Validation Loss by Missing-Data Strategy"
     )
-
-
-figure.tight_layout()
-
-
-figure.savefig(
-
-    FIGURE_DIRECTORY
-    /
-    "regression_imputation_gain.png",
-
-    dpi=300,
-
-    bbox_inches="tight"
-)
-
-
-plt.close(
-    figure
 )
 
 
 # =============================================================================
-# 15. CREATE COMBINED MODEL SUMMARY TABLE
+# 22. CREATE PRIMARY COMPARISON TABLE IMAGE
 # =============================================================================
 
-classification_table = classification_results[
+table_data = strategy_level_results[
 
     [
-        "condition",
-        "number_of_groups",
-        "total_parameters",
-        "best_epoch",
-        "balanced_accuracy",
-        "sensitivity",
-        "specificity"
-    ]
-].copy()
-
-
-classification_table = (
-    classification_table.rename(
-        columns={
-
-            "best_epoch":
-                "classification_best_epoch",
-
-            "balanced_accuracy":
-                "balanced_accuracy",
-
-            "sensitivity":
-                "sensitivity",
-
-            "specificity":
-                "specificity"
-        }
-    )
-)
-
-
-regression_table = regression_results[
-
-    [
-        "condition",
-        "best_epoch",
-        "rmse",
-        "mae",
-        "r2"
-    ]
-].copy()
-
-
-regression_table = (
-    regression_table.rename(
-        columns={
-
-            "best_epoch":
-                "regression_best_epoch"
-        }
-    )
-)
-
-
-comparison_table = classification_table.merge(
-
-    regression_table,
-
-    on="condition",
-
-    how="inner"
-)
-
-
-comparison_table["condition_label"] = (
-
-    comparison_table[
-        "condition"
-    ]
-    .astype(str)
-    .map(
-        CONDITION_LABELS
-    )
-)
-
-
-comparison_table = comparison_table[
-
-    [
-        "condition",
-        "condition_label",
-        "number_of_groups",
-        "total_parameters",
+        "scenario",
+        "strategy",
+        "classification_parameters",
         "classification_best_epoch",
         "balanced_accuracy",
         "sensitivity",
@@ -1347,55 +2557,37 @@ comparison_table = comparison_table[
         "mae",
         "r2"
     ]
-]
 
-
-comparison_table.to_csv(
-
-    RESULTS_DIRECTORY
-    /
-    "model_comparison_summary.csv",
-
-    index=False
-)
-
-
-# =============================================================================
-# 16. CREATE PRESENTATION-READY TABLE IMAGE
-# =============================================================================
-
-display_table = comparison_table[
-
-    [
-        "condition_label",
-        "total_parameters",
-        "balanced_accuracy",
-        "sensitivity",
-        "specificity",
-        "rmse",
-        "mae",
-        "r2"
-    ]
 ].copy()
 
 
-display_table = display_table.rename(
+table_data = table_data.rename(
+
     columns={
 
-        "condition_label":
-            "Condition",
+        "scenario":
+            "Scenario",
 
-        "total_parameters":
-            "Parameters",
+        "strategy":
+            "Strategy",
+
+        "classification_parameters":
+            "Params",
+
+        "classification_best_epoch":
+            "Class Epoch",
 
         "balanced_accuracy":
-            "Balanced Acc.",
+            "BA",
 
         "sensitivity":
-            "Sensitivity",
+            "Sens",
 
         "specificity":
-            "Specificity",
+            "Spec",
+
+        "regression_best_epoch":
+            "Reg Epoch",
 
         "rmse":
             "RMSE",
@@ -1409,35 +2601,84 @@ display_table = display_table.rename(
 )
 
 
+# Convert categorical columns to ordinary strings before rendering.
+
+table_data[
+    "Scenario"
+] = table_data[
+    "Scenario"
+].astype(
+    str
+)
+
+
+table_data[
+    "Strategy"
+] = table_data[
+    "Strategy"
+].astype(
+    str
+)
+
+
+# -------------------------------------------------------------------------
+# FORMAT DECIMAL COLUMNS
+# -------------------------------------------------------------------------
+
 for column in [
 
-    "Balanced Acc.",
-
-    "Sensitivity",
-
-    "Specificity",
-
+    "BA",
+    "Sens",
+    "Spec",
     "RMSE",
-
     "MAE",
-
     "R²"
+
 ]:
 
-    display_table[column] = (
+    table_data[
+        column
+    ] = table_data[
+        column
+    ].map(
 
-        display_table[column]
-        .map(
-            lambda value:
-            f"{value:.3f}"
-        )
+        lambda value:
+        f"{value:.3f}"
     )
 
 
+# -------------------------------------------------------------------------
+# FORMAT INTEGER COLUMNS
+# -------------------------------------------------------------------------
+
+for column in [
+
+    "Params",
+    "Class Epoch",
+    "Reg Epoch"
+
+]:
+
+    table_data[
+        column
+    ] = table_data[
+        column
+    ].map(
+
+        lambda value:
+        f"{int(value)}"
+    )
+
+
+# -------------------------------------------------------------------------
+# DRAW TABLE
+# -------------------------------------------------------------------------
+
 figure, axis = plt.subplots(
+
     figsize=(
-        15,
-        5.5
+        18,
+        5.8
     )
 )
 
@@ -1450,11 +2691,11 @@ axis.axis(
 table = axis.table(
 
     cellText=(
-        display_table.values
+        table_data.values
     ),
 
     colLabels=(
-        display_table.columns
+        table_data.columns
     ),
 
     cellLoc="center",
@@ -1469,7 +2710,7 @@ table.auto_set_font_size(
 
 
 table.set_fontsize(
-    10
+    9
 )
 
 
@@ -1481,7 +2722,7 @@ table.scale(
 
 axis.set_title(
 
-    "LongGCN Prediction Performance Across Missing-Data Conditions",
+    "Primary Missing-Data Strategy Comparison",
 
     pad=20
 )
@@ -1493,8 +2734,10 @@ figure.tight_layout()
 figure.savefig(
 
     FIGURE_DIRECTORY
+
     /
-    "model_comparison_table.png",
+
+    "primary_strategy_comparison_table.png",
 
     dpi=300,
 
@@ -1508,49 +2751,94 @@ plt.close(
 
 
 # =============================================================================
-# 17. PRINT RESULTS
+# 23. CONSOLE SUMMARY
 # =============================================================================
 
 print()
 
 print(
-    "=" * 80
+    "=" * 88
 )
 
 print(
-    "MODEL RESULTS SUMMARY"
+    "PRIMARY SCIENTIFIC COMPARISON"
 )
 
 print(
-    "=" * 80
+    "=" * 88
 )
 
 
 print()
 
+
 print(
-    "CLASSIFICATION"
+    "Incomplete data"
 )
 
 print(
-    "--------------"
+    "      |"
+)
+
+print(
+    "      |-----------------------------|"
+)
+
+print(
+    "      |                             |"
+)
+
+print(
+    "      v                             v"
+)
+
+print(
+    "Direct LongGCN                  MICE3D"
+)
+
+print(
+    "                                    |"
+)
+
+print(
+    "                                    v"
+)
+
+print(
+    "                                Deep ReLU"
 )
 
 
+# =============================================================================
+# CLASSIFICATION CONSOLE SUMMARY
+# =============================================================================
+
+print()
+
 print(
+    "CLASSIFICATION: BALANCED ACCURACY"
+)
 
-    classification_results[
+print(
+    "---------------------------------"
+)
 
-        [
-            "condition_label",
-            "balanced_accuracy",
-            "sensitivity",
-            "specificity",
-            "total_parameters",
-            "best_epoch"
-        ]
+
+classification_display = primary_comparison[
+
+    [
+        "scenario",
+        "direct_longgcn_balanced_accuracy",
+        "mice3d_deep_relu_balanced_accuracy",
+        "conventional_balanced_accuracy_gain"
     ]
-    .to_string(
+
+].copy()
+
+
+print(
+
+    classification_display.to_string(
         index=False
     )
 )
@@ -1559,28 +2847,41 @@ print(
 print()
 
 print(
-    "REGRESSION"
-)
-
-print(
-    "----------"
+    "Positive conventional_balanced_accuracy_gain values favor "
+    "MICE3D + Deep ReLU."
 )
 
 
+# =============================================================================
+# REGRESSION CONSOLE SUMMARY
+# =============================================================================
+
+print()
+
 print(
+    "REGRESSION: RMSE"
+)
 
-    regression_results[
+print(
+    "----------------"
+)
 
-        [
-            "condition_label",
-            "rmse",
-            "mae",
-            "r2",
-            "total_parameters",
-            "best_epoch"
-        ]
+
+regression_display = primary_comparison[
+
+    [
+        "scenario",
+        "direct_longgcn_rmse",
+        "mice3d_deep_relu_rmse",
+        "conventional_rmse_gain"
     ]
-    .to_string(
+
+].copy()
+
+
+print(
+
+    regression_display.to_string(
         index=False
     )
 )
@@ -1589,34 +2890,72 @@ print(
 print()
 
 print(
-    "IMPUTATION EFFECTS"
-)
-
-print(
-    "------------------"
+    "Positive conventional_rmse_gain values favor "
+    "MICE3D + Deep ReLU."
 )
 
 
+# =============================================================================
+# GROUP + MCAR THREE-STRATEGY CONSOLE SUMMARY
+# =============================================================================
+
+print()
+
 print(
+    "GROUP-SPECIFIC + MCAR: THREE-STRATEGY COMPARISON"
+)
 
-    imputation_summary[
+print(
+    "------------------------------------------------"
+)
 
-        [
-            "comparison",
-            "balanced_accuracy_gain",
-            "rmse_gain"
-        ]
+
+group_display = group_mcar_plot_data[
+
+    [
+        "strategy",
+        "balanced_accuracy",
+        "sensitivity",
+        "specificity",
+        "rmse",
+        "mae",
+        "r2"
     ]
-    .to_string(
+
+].copy()
+
+
+print(
+
+    group_display.to_string(
         index=False
     )
 )
 
 
+# =============================================================================
+# OUTPUT LOCATIONS
+# =============================================================================
+
 print()
 
 print(
-    "Positive imputation-gain values indicate improved predictive performance."
+    "Output tables saved to:"
+)
+
+
+print(
+    STRATEGY_LEVEL_RESULTS_PATH
+)
+
+
+print(
+    PRIMARY_COMPARISON_PATH
+)
+
+
+print(
+    GROUP_MCAR_COMPARISON_PATH
 )
 
 
@@ -1625,6 +2964,7 @@ print()
 print(
     "Figures saved to:"
 )
+
 
 print(
     FIGURE_DIRECTORY

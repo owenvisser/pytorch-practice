@@ -1,0 +1,23 @@
+{
+    "architecture": "deep_relu",
+    "condition": "mcar_to_complete",
+    "task": "classification",
+    "seed": 100,
+    "number_of_measurements": 5,
+    "latent_dimension": 8,
+    "hidden_dimension": 8,
+    "number_of_hidden_layers": 4,
+    "pooling": "max",
+    "total_parameters": 345,
+    "trainable_parameters": 345,
+    "number_of_epochs_maximum": 500,
+    "learning_rate": 0.001,
+    "weight_decay": 0.0,
+    "scheduler_factor": 0.5,
+    "scheduler_patience": 10,
+    "minimum_learning_rate": 1e-06,
+    "early_stopping_patience": 100,
+    "minimum_validation_improvement": 0.0001,
+    "checkpoint_interval": 1,
+    "classification_threshold": 0.5
+}
