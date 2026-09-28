@@ -99,6 +99,13 @@ GROUP_MASKING_SEED = 300
 
 GROUP_PLUS_MCAR_SEED = 400
 
+# Patient used to test complete absence of one designed measurement group.
+#
+# This patient will never receive x4 or x5.
+
+GROUP_ONE_ONLY_PATIENT_IDS = [
+    1
+]
 
 # =============================================================================
 # 2. INPUT AND OUTPUT DIRECTORIES
@@ -195,6 +202,8 @@ mcar_longitudinal_data, mcar_mask = apply_mcar_missingness(
 
     group_one_proportion=GROUP_ONE_PROPORTION,
 
+    group_one_only_patient_ids=GROUP_ONE_ONLY_PATIENT_IDS,
+
     seed=GROUP_MASKING_SEED
 )
 
@@ -220,6 +229,116 @@ mcar_longitudinal_data, mcar_mask = apply_mcar_missingness(
     seed=GROUP_PLUS_MCAR_SEED
 )
 
+
+# =============================================================================
+# CHECK PATIENT WITH NO GROUP 2 MEASUREMENTS
+# =============================================================================
+
+test_patient_id = GROUP_ONE_ONLY_PATIENT_IDS[0]
+
+
+group_specific_test_patient = (
+    group_masked_longitudinal_data[
+        group_masked_longitudinal_data[
+            "patient_id"
+        ] == test_patient_id
+    ]
+)
+
+
+group_specific_mcar_test_patient = (
+    group_mcar_longitudinal_data[
+        group_mcar_longitudinal_data[
+            "patient_id"
+        ] == test_patient_id
+    ]
+)
+
+
+print()
+print("============================================================")
+print(
+    f"CHECKING PATIENT {test_patient_id}: "
+    "NO GROUP 2 MEASUREMENTS"
+)
+print("============================================================")
+
+
+print()
+print("Group-specific data:")
+
+print(
+    group_specific_test_patient[
+        [
+            "patient_id",
+            "visit_number",
+            "time",
+            "x1",
+            "x2",
+            "x3",
+            "x4",
+            "x5"
+        ]
+    ].to_string(
+        index=False
+    )
+)
+
+
+print()
+print("Group-specific + MCAR data:")
+
+print(
+    group_specific_mcar_test_patient[
+        [
+            "patient_id",
+            "visit_number",
+            "time",
+            "x1",
+            "x2",
+            "x3",
+            "x4",
+            "x5"
+        ]
+    ].to_string(
+        index=False
+    )
+)
+
+
+# Confirm that x4 and x5 are absent across the patient's entire record.
+
+assert (
+    group_specific_test_patient[
+        [
+            "x4",
+            "x5"
+        ]
+    ]
+    .isna()
+    .all()
+    .all()
+)
+
+
+assert (
+    group_specific_mcar_test_patient[
+        [
+            "x4",
+            "x5"
+        ]
+    ]
+    .isna()
+    .all()
+    .all()
+)
+
+
+print()
+print(
+    f"Confirmed: patient {test_patient_id} "
+    "has no observed x4 or x5 values."
+)
 
 # =============================================================================
 # 7. CALCULATE MISSING-DATA SUMMARIES

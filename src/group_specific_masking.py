@@ -2,27 +2,42 @@
 Group-Specific Measurement Masking
 ==================================
 
-This module creates structured missing-data patterns in which different
-measurement groups are observed at different longitudinal observation times.
+This module creates structured longitudinal missingness based on predefined
+measurement groups.
 
-The initial masking scheme divides each patient's observation times into two
-complementary sets:
+For the current simulation, the default measurement groups are:
 
-    Group 1 measurements: x1, x2, x3
-    Group 2 measurements: x4, x5
+    Group 1
+        x1, x2, x3
 
-At observation times assigned to Group 1, measurements x4 and x5 are masked.
+    Group 2
+        x4, x5
 
-At observation times assigned to Group 2, measurements x1, x2, and x3 are
-masked.
+Under the standard group-specific masking mechanism, each patient has some
+observation times assigned to Group 1 and the remaining observation times
+assigned to Group 2.
 
-This creates an extreme structured missing-data setting in which the two
-measurement groups are never observed at the same time. The resulting data
-can be used to evaluate graph neural network architectures that explicitly
-model group-specific longitudinal measurement patterns.
+At a Group 1 observation time:
 
-Additional random missingness can later be applied to the masked data using
-the separate missing-data generation module.
+    x1, x2, x3 are retained
+    x4, x5 are masked
+
+At a Group 2 observation time:
+
+    x4, x5 are retained
+    x1, x2, x3 are masked
+
+The function also allows selected patients to be assigned exclusively to
+Group 1. Such patients never receive any Group 2 measurements and therefore
+have:
+
+    x4 = missing
+    x5 = missing
+
+at every observation time.
+
+This provides a useful stress test for LongGCN because the corresponding
+patient has no observations from the second designed measurement group.
 """
 
 
@@ -31,7 +46,7 @@ import pandas as pd
 
 
 # =============================================================================
-# APPLY GROUP-SPECIFIC MEASUREMENT MASKING
+# APPLY GROUP-SPECIFIC MASKING
 # =============================================================================
 
 def apply_group_specific_masking(
@@ -39,74 +54,63 @@ def apply_group_specific_masking(
     group_one_measurements=None,
     group_two_measurements=None,
     group_one_proportion=0.50,
+    group_one_only_patient_ids=None,
     seed=300
 ):
     """
-    Assign each observation time to one of two measurement groups and mask
-    measurements belonging to the opposite group.
-
-    For each patient, observation times are randomly partitioned into two
-    complementary sets.
-
-    At Group 1 times:
-
-        x1, x2, x3 are observed
-        x4, x5 are masked
-
-    At Group 2 times:
-
-        x1, x2, x3 are masked
-        x4, x5 are observed
-
-    By default, approximately half of each patient's visits are assigned to
-    each group. Every patient is forced to have at least one observation time
-    in each group.
+    Apply structured group-specific measurement masking.
 
     Parameters
     ----------
     longitudinal_data : pandas.DataFrame
-        Complete longitudinal data containing one row per patient visit.
+        Complete visit-level longitudinal data.
 
-    group_one_measurements : list of str or None
-        Measurements belonging to the first measurement group.
-        If None, ["x1", "x2", "x3"] is used.
+    group_one_measurements : list[str] or None
+        Measurements belonging to Group 1.
 
-    group_two_measurements : list of str or None
-        Measurements belonging to the second measurement group.
-        If None, ["x4", "x5"] is used.
+        Defaults to:
+
+            x1, x2, x3
+
+    group_two_measurements : list[str] or None
+        Measurements belonging to Group 2.
+
+        Defaults to:
+
+            x4, x5
 
     group_one_proportion : float
-        Approximate proportion of each patient's observation times assigned
-        to Group 1.
+        Approximate proportion of observation times assigned to Group 1 for
+        patients following the standard two-group observation structure.
+
+        Defaults to 0.50.
+
+    group_one_only_patient_ids : iterable or None
+        Optional patient IDs that should never receive Group 2 measurements.
+
+        Every observation time for these patients is assigned to Group 1.
+
+        Therefore all Group 2 measurements are missing across the patient's
+        complete longitudinal record.
 
     seed : int
-        Random seed used to assign observation times to measurement groups.
+        Random seed used for assigning observation times to groups.
 
     Returns
     -------
     masked_longitudinal_data : pandas.DataFrame
-        Copy of the longitudinal data after applying group-specific masking.
+        Longitudinal data after structural measurement masking.
 
     group_assignments : pandas.DataFrame
-        Patient, visit, and time identifiers together with the assigned
-        measurement group for each observation time.
+        Patient/time-level group assignment.
 
     group_mask : pandas.DataFrame
-        Boolean indicators identifying which measurements were removed by
-        the group-specific masking process.
+        Boolean indicators showing which measurement cells were structurally
+        masked.
     """
 
     # -------------------------------------------------------------------------
-    # 1. INITIALIZE RANDOM NUMBER GENERATOR
-    # -------------------------------------------------------------------------
-
-    rng = np.random.default_rng(
-        seed
-    )
-
-
-    # -------------------------------------------------------------------------
-    # 2. DEFINE MEASUREMENT GROUPS
+    # 1. DEFAULT MEASUREMENT GROUPS
     # -------------------------------------------------------------------------
 
     if group_one_measurements is None:
@@ -126,14 +130,33 @@ def apply_group_specific_masking(
         ]
 
 
-    all_measurements = (
-        group_one_measurements
-        + group_two_measurements
+    # -------------------------------------------------------------------------
+    # 2. PATIENTS WITH NO GROUP 2 OBSERVATIONS
+    # -------------------------------------------------------------------------
+
+    if group_one_only_patient_ids is None:
+
+        group_one_only_patient_ids = set()
+
+
+    else:
+
+        group_one_only_patient_ids = set(
+            group_one_only_patient_ids
+        )
+
+
+    # -------------------------------------------------------------------------
+    # 3. RANDOM NUMBER GENERATOR
+    # -------------------------------------------------------------------------
+
+    rng = np.random.default_rng(
+        seed
     )
 
 
     # -------------------------------------------------------------------------
-    # 3. CREATE OUTPUT DATA SET
+    # 4. COPY COMPLETE LONGITUDINAL DATA
     # -------------------------------------------------------------------------
 
     masked_longitudinal_data = (
@@ -142,16 +165,19 @@ def apply_group_specific_masking(
 
 
     # -------------------------------------------------------------------------
-    # 4. CREATE MEASUREMENT-GROUP ASSIGNMENT TABLE
+    # 5. CREATE GROUP-ASSIGNMENT TABLE
     # -------------------------------------------------------------------------
 
-    group_assignments = longitudinal_data[
-        [
-            "patient_id",
-            "visit_number",
-            "time"
+    group_assignments = (
+        longitudinal_data[
+            [
+                "patient_id",
+                "visit_number",
+                "time"
+            ]
         ]
-    ].copy()
+        .copy()
+    )
 
 
     group_assignments[
@@ -160,137 +186,190 @@ def apply_group_specific_masking(
 
 
     # -------------------------------------------------------------------------
-    # 5. CREATE GROUP-SPECIFIC MASK TABLE
+    # 6. CREATE STRUCTURAL MASK TABLE
     # -------------------------------------------------------------------------
 
-    group_mask = longitudinal_data[
-        [
-            "patient_id",
-            "visit_number",
-            "time"
+    group_mask = (
+        longitudinal_data[
+            [
+                "patient_id",
+                "visit_number",
+                "time"
+            ]
         ]
-    ].copy()
+        .copy()
+    )
 
 
-    for measurement_name in all_measurements:
+    all_measurements = (
+        group_one_measurements
+        +
+        group_two_measurements
+    )
+
+
+    for measurement in all_measurements:
 
         group_mask[
-            f"{measurement_name}_masked"
+            f"{measurement}_masked"
         ] = False
 
 
-    # -------------------------------------------------------------------------
-    # 6. PARTITION EACH PATIENT'S OBSERVATION TIMES
-    # -------------------------------------------------------------------------
+    # =========================================================================
+    # 7. ASSIGN OBSERVATION TIMES WITHIN EACH PATIENT
+    # =========================================================================
 
-    for patient_id, patient_visits in longitudinal_data.groupby(
+    for patient_id, patient_data in longitudinal_data.groupby(
         "patient_id",
         sort=False
     ):
 
-        patient_rows = (
-            patient_visits.index.to_numpy()
+        patient_indices = (
+            patient_data
+            .index
+            .to_numpy()
         )
 
-        number_of_visits = len(
-            patient_rows
+
+        number_of_times = len(
+            patient_indices
         )
 
 
-        # Determine approximately how many visits should belong to Group 1.
+        # ---------------------------------------------------------------------
+        # PATIENT HAS NO GROUP 2 MEASUREMENTS
+        # ---------------------------------------------------------------------
 
-        number_group_one = int(
-            round(
-                group_one_proportion
-                * number_of_visits
+        if patient_id in group_one_only_patient_ids:
+
+            group_one_indices = (
+                patient_indices
             )
-        )
 
 
-        # Ensure that both groups occur at least once for every patient.
-
-        number_group_one = max(
-            1,
-            number_group_one
-        )
-
-        number_group_one = min(
-            number_of_visits - 1,
-            number_group_one
-        )
-
-
-        # Randomly choose the observation times belonging to Group 1.
-
-        group_one_rows = rng.choice(
-            patient_rows,
-            size=number_group_one,
-            replace=False
-        )
-
-
-        # All remaining observation times belong to Group 2.
-
-        group_two_rows = np.setdiff1d(
-            patient_rows,
-            group_one_rows
-        )
+            group_two_indices = np.array(
+                [],
+                dtype=patient_indices.dtype
+            )
 
 
         # ---------------------------------------------------------------------
-        # 7. RECORD GROUP ASSIGNMENTS
+        # STANDARD TWO-GROUP PATIENT
         # ---------------------------------------------------------------------
+
+        else:
+
+            # Determine approximately how many observation times belong to
+            # Group 1.
+
+            number_group_one = int(
+                round(
+                    group_one_proportion
+                    *
+                    number_of_times
+                )
+            )
+
+
+            # For ordinary patients, retain at least one observation time in
+            # each group whenever the patient has at least two times.
+
+            if number_of_times >= 2:
+
+                number_group_one = max(
+                    1,
+                    min(
+                        number_group_one,
+                        number_of_times - 1
+                    )
+                )
+
+
+            else:
+
+                number_group_one = 1
+
+
+            # Randomly select Group 1 observation times.
+
+            group_one_indices = rng.choice(
+
+                patient_indices,
+
+                size=number_group_one,
+
+                replace=False
+            )
+
+
+            # All remaining observation times belong to Group 2.
+
+            group_two_indices = np.setdiff1d(
+
+                patient_indices,
+
+                group_one_indices
+            )
+
+
+        # =====================================================================
+        # 8. APPLY GROUP 1 MASKING
+        # =====================================================================
 
         group_assignments.loc[
-            group_one_rows,
+            group_one_indices,
             "measurement_group"
         ] = "group_1"
 
 
-        group_assignments.loc[
-            group_two_rows,
-            "measurement_group"
-        ] = "group_2"
-
-
-        # ---------------------------------------------------------------------
-        # 8. MASK GROUP 2 MEASUREMENTS AT GROUP 1 TIMES
-        # ---------------------------------------------------------------------
+        # At Group 1 times, Group 2 measurements are structurally missing.
 
         masked_longitudinal_data.loc[
-            group_one_rows,
+            group_one_indices,
             group_two_measurements
         ] = np.nan
 
 
-        for measurement_name in group_two_measurements:
+        for measurement in group_two_measurements:
 
             group_mask.loc[
-                group_one_rows,
-                f"{measurement_name}_masked"
+                group_one_indices,
+                f"{measurement}_masked"
             ] = True
 
 
-        # ---------------------------------------------------------------------
-        # 9. MASK GROUP 1 MEASUREMENTS AT GROUP 2 TIMES
-        # ---------------------------------------------------------------------
+        # =====================================================================
+        # 9. APPLY GROUP 2 MASKING
+        # =====================================================================
 
-        masked_longitudinal_data.loc[
-            group_two_rows,
-            group_one_measurements
-        ] = np.nan
+        if len(
+            group_two_indices
+        ) > 0:
+
+            group_assignments.loc[
+                group_two_indices,
+                "measurement_group"
+            ] = "group_2"
 
 
-        for measurement_name in group_one_measurements:
+            # At Group 2 times, Group 1 measurements are structurally missing.
 
-            group_mask.loc[
-                group_two_rows,
-                f"{measurement_name}_masked"
-            ] = True
+            masked_longitudinal_data.loc[
+                group_two_indices,
+                group_one_measurements
+            ] = np.nan
+
+
+            for measurement in group_one_measurements:
+
+                group_mask.loc[
+                    group_two_indices,
+                    f"{measurement}_masked"
+                ] = True
 
 
     # -------------------------------------------------------------------------
-    # 10. RETURN MASKED DATA AND MASKING INFORMATION
+    # 10. RETURN STRUCTURED-MISSINGNESS DATA
     # -------------------------------------------------------------------------
 
     return (

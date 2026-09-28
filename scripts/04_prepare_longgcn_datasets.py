@@ -1,54 +1,65 @@
 """
-Prepare Data Sets for LongGCN
-=============================
+Prepare LongGCN Datasets
+========================
 
-This script converts each train, validation, and test longitudinal data set
-into the observation-level format expected by the LongGCN package.
+This script converts the previously created train, validation, and test data
+splits into model-ready LongGCN PyTorch datasets.
 
-The visit-level simulated data contain one row per patient visit:
+The script assumes that:
 
-    patient_id
-    visit_number
-    time
-    x1
-    x2
-    x3
-    x4
-    x5
+    scripts/01_generate_simulated_data.py
+    scripts/02_generate_incomplete_datasets.py
+    scripts/03_create_data_splits.py
 
-The LongGCN representation contains one row per observed scalar measurement:
+have already been run.
 
-    patient_id
-    time
-    measurement
-    value
+Four longitudinal-data conditions are prepared:
 
-Missing measurements are omitted from this representation.
+    complete
+        Fully observed longitudinal data.
 
-Four data conditions are prepared:
+    mcar
+        Individual measurements removed completely at random.
 
-1. Complete data
-2. MCAR-only data
-3. Group-specific masked data
-4. Group-specific masked data with additional MCAR missingness
+    group_specific
+        Observation times follow the predefined measurement-group structure.
 
-Two measurement-group structures are used:
+    group_specific_mcar
+        Group-specific observation structure with additional MCAR missingness.
 
-Single-group structure
-    {x1, x2, x3, x4, x5}
+Two prediction tasks are prepared for every condition:
 
-Two-group structure
-    Group 1 = {x1, x2, x3}
-    Group 2 = {x4, x5}
+    classification
+        Uses classification_outcome.
 
-The single-group structure is used for complete and MCAR-only data.
-The two-group structure is used for the group-specific data conditions.
+    regression
+        Uses regression_outcome.
 
-The resulting observation-level CSV files are saved for reproducibility.
-LongGCN objects themselves are constructed from these files as needed rather
-than being serialized to disk.
+The complete and MCAR datasets use one designed measurement group containing
+all five measurements.
 
-Run this script from the root PyTorch-Practice directory using:
+The group-specific datasets use two designed groups:
+
+    group_1
+        x1, x2, x3
+
+    group_2
+        x4, x5
+
+For each condition, task, and data split, the script constructs and saves a
+LongGCNTorchDataset with precompute=True.
+
+The saved datasets therefore already contain the patient-specific:
+
+    X_i
+    T_i
+    P_i
+    A_i
+    y_i
+
+representations required for model training.
+
+Run from the project root using:
 
     python scripts/04_prepare_longgcn_datasets.py
 """
@@ -59,31 +70,73 @@ import json
 import sys
 
 import pandas as pd
+import torch
+
+
+# =============================================================================
+# 1. PROJECT PATHS
+# =============================================================================
+
+PROJECT_ROOT = (
+    Path(__file__)
+    .resolve()
+    .parents[1]
+)
+
+
+# Allow imports from the local src directory when the script is run directly
+# from the project root.
+
+if str(PROJECT_ROOT) not in sys.path:
+
+    sys.path.insert(
+        0,
+        str(PROJECT_ROOT)
+    )
+
+
+from src.longgcn_data_preparation import (
+    convert_to_longgcn_format
+)
+
 
 from longgcn.data import (
     LongitudinalDataset,
-    DesignedMeasurementGroups
+    DesignedMeasurementGroups,
+    LongGCNTorchDataset
 )
 
 
 # =============================================================================
-# PROJECT PATHS
+# 2. INPUT AND OUTPUT DIRECTORIES
 # =============================================================================
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-
-
-sys.path.insert(
-    0,
-    str(PROJECT_ROOT)
+SPLIT_DIRECTORY = (
+    PROJECT_ROOT
+    /
+    "data"
+    /
+    "splits"
 )
 
 
-from src.longgcn_data_preparation import convert_to_longgcn_format
+OUTPUT_DIRECTORY = (
+    PROJECT_ROOT
+    /
+    "data"
+    /
+    "longgcn"
+)
+
+
+OUTPUT_DIRECTORY.mkdir(
+    parents=True,
+    exist_ok=True
+)
 
 
 # =============================================================================
-# 1. LONGITUDINAL MEASUREMENT DEFINITIONS
+# 3. MEASUREMENT SETTINGS
 # =============================================================================
 
 MEASUREMENT_COLUMNS = [
@@ -95,9 +148,38 @@ MEASUREMENT_COLUMNS = [
 ]
 
 
-# All measurements belong to one common group.
+# =============================================================================
+# 4. TEMPORAL WEIGHTING SETTINGS
+# =============================================================================
+
+# Temporal communication uses:
+#
+#     exp(-delta_t / d)
+#
+# The value used in the initial simulation experiments is specified here.
+#
+# Because T_i and A_ig are precomputed, changing this value requires rerunning
+# this preparation script.
+
+DECAY_PARAMETER = 0.75
+
+
+# =============================================================================
+# 5. PRECOMPUTATION SETTING
+# =============================================================================
+
+# Precomputing avoids reconstructing T_i, P_i, and A_ig during every training
+# epoch.
+
+PRECOMPUTE = True
+
+
+# =============================================================================
+# 6. DESIGNED MEASUREMENT GROUPS
+# =============================================================================
 
 SINGLE_GROUP_DEFINITION = {
+
     "all_measurements": [
         "x1",
         "x2",
@@ -108,14 +190,14 @@ SINGLE_GROUP_DEFINITION = {
 }
 
 
-# Measurements belong to two distinct designed groups.
-
 TWO_GROUP_DEFINITION = {
+
     "group_1": [
         "x1",
         "x2",
         "x3"
     ],
+
     "group_2": [
         "x4",
         "x5"
@@ -124,61 +206,62 @@ TWO_GROUP_DEFINITION = {
 
 
 # =============================================================================
-# 2. INPUT AND OUTPUT DIRECTORIES
+# 7. LONGITUDINAL DATA CONDITIONS
 # =============================================================================
-
-SPLIT_DATA_DIRECTORY = (
-    PROJECT_ROOT
-    / "data"
-    / "splits"
-)
-
-
-LONGGCN_DATA_DIRECTORY = (
-    PROJECT_ROOT
-    / "data"
-    / "longgcn"
-)
-
-
-LONGGCN_DATA_DIRECTORY.mkdir(
-    parents=True,
-    exist_ok=True
-)
-
-
-# =============================================================================
-# 3. DEFINE DATA CONDITIONS
-# =============================================================================
-
-# Each data condition records:
-#
-#     1. the filename pattern used in data/splits/
-#     2. the measurement-group structure used by LongGCN
 
 DATA_CONDITIONS = {
 
     "complete": {
-        "filename_suffix": "complete_longitudinal_data.csv",
-        "groups": SINGLE_GROUP_DEFINITION
+        "file_label":
+            "complete",
+
+        "groups":
+            SINGLE_GROUP_DEFINITION
     },
 
     "mcar": {
-        "filename_suffix": "mcar_longitudinal_data.csv",
-        "groups": SINGLE_GROUP_DEFINITION
+        "file_label":
+            "mcar",
+
+        "groups":
+            SINGLE_GROUP_DEFINITION
     },
 
     "group_specific": {
-        "filename_suffix": "group_specific_longitudinal_data.csv",
-        "groups": TWO_GROUP_DEFINITION
+        "file_label":
+            "group_specific",
+
+        "groups":
+            TWO_GROUP_DEFINITION
     },
 
     "group_specific_mcar": {
-        "filename_suffix": "group_specific_mcar_longitudinal_data.csv",
-        "groups": TWO_GROUP_DEFINITION
+        "file_label":
+            "group_specific_mcar",
+
+        "groups":
+            TWO_GROUP_DEFINITION
     }
 }
 
+
+# =============================================================================
+# 8. PREDICTION TASKS
+# =============================================================================
+
+PREDICTION_TASKS = {
+
+    "classification":
+        "classification_outcome",
+
+    "regression":
+        "regression_outcome"
+}
+
+
+# =============================================================================
+# 9. DATA SPLITS
+# =============================================================================
 
 DATA_SPLITS = [
     "train",
@@ -188,319 +271,536 @@ DATA_SPLITS = [
 
 
 # =============================================================================
-# 4. CREATE LONGGCN MEASUREMENT-GROUP OBJECTS
+# CREATE PATIENT-LEVEL OUTCOME MAPPING
 # =============================================================================
 
-single_group_design = DesignedMeasurementGroups(
-    measurements=MEASUREMENT_COLUMNS,
-    groups=SINGLE_GROUP_DEFINITION
-)
+def create_outcome_mapping(
+    patient_data,
+    outcome_column
+):
+    """
+    Create a patient-ID-to-outcome mapping.
+
+    Parameters
+    ----------
+    patient_data : pandas.DataFrame
+        Patient-level data containing patient_id and the requested outcome.
+
+    outcome_column : str
+        Name of the patient-level outcome column.
+
+    Returns
+    -------
+    outcomes : dict
+        Mapping:
+
+            patient_id -> outcome
+    """
+
+    outcomes = dict(
+        zip(
+            patient_data[
+                "patient_id"
+            ],
+            patient_data[
+                outcome_column
+            ]
+        )
+    )
 
 
-two_group_design = DesignedMeasurementGroups(
-    measurements=MEASUREMENT_COLUMNS,
-    groups=TWO_GROUP_DEFINITION
-)
+    return outcomes
 
 
 # =============================================================================
-# 5. CONVERT EACH DATA SET TO LONGGCN FORMAT
+# CREATE LONGITUDINAL DATASET
 # =============================================================================
 
-# Keep the constructed LongitudinalDataset objects in memory while the script
-# runs so that we can verify every data condition successfully passes through
-# the LongGCN package.
+def create_longitudinal_dataset(
+    wide_longitudinal_data
+):
+    """
+    Convert wide visit-level longitudinal data into LongGCN format.
 
-longgcn_datasets = {}
+    Parameters
+    ----------
+    wide_longitudinal_data : pandas.DataFrame
+        One row per patient observation time with measurement columns x1-x5.
+
+    Returns
+    -------
+    longitudinal_dataset : LongitudinalDataset
+        Generalized LongGCN longitudinal representation.
+
+    observation_level_data : pandas.DataFrame
+        Observation-level representation used to create the dataset.
+    """
+
+    # -------------------------------------------------------------------------
+    # 1. CONVERT TO OBSERVATION-LEVEL FORMAT
+    # -------------------------------------------------------------------------
+
+    observation_level_data = (
+        convert_to_longgcn_format(
+
+            longitudinal_data=wide_longitudinal_data,
+
+            measurement_columns=MEASUREMENT_COLUMNS
+        )
+    )
 
 
-print()
-print("============================================================")
-print("PREPARING LONGGCN DATA SETS")
-print("============================================================")
+    # -------------------------------------------------------------------------
+    # 2. CREATE LONGGCN LONGITUDINAL DATASET
+    # -------------------------------------------------------------------------
 
+    longitudinal_dataset = LongitudinalDataset(
+
+        data=observation_level_data,
+
+        patient_col="patient_id",
+
+        time_col="time",
+
+        measurement_col="measurement",
+
+        value_col="value"
+    )
+
+
+    return (
+        longitudinal_dataset,
+        observation_level_data
+    )
+
+
+# =============================================================================
+# CREATE DESIGNED MEASUREMENT GROUPS
+# =============================================================================
+
+def create_measurement_groups(
+    group_definition
+):
+    """
+    Create the designed measurement-group specification.
+
+    Parameters
+    ----------
+    group_definition : dict
+        Mapping from group name to measurement names.
+
+    Returns
+    -------
+    measurement_groups : DesignedMeasurementGroups
+        LongGCN measurement-group specification.
+    """
+
+    measurement_groups = DesignedMeasurementGroups(
+
+        measurements=MEASUREMENT_COLUMNS,
+
+        groups=group_definition
+    )
+
+
+    return measurement_groups
+
+
+# =============================================================================
+# CREATE LONGGCN PYTORCH DATASET
+# =============================================================================
+
+def create_torch_dataset(
+    longitudinal_dataset,
+    measurement_groups,
+    patient_data,
+    outcome_column
+):
+    """
+    Construct a model-ready LongGCNTorchDataset.
+
+    Parameters
+    ----------
+    longitudinal_dataset : LongitudinalDataset
+        Generalized patient-level longitudinal representation.
+
+    measurement_groups : DesignedMeasurementGroups
+        Measurement-group specification.
+
+    patient_data : pandas.DataFrame
+        Patient-level data for the corresponding split.
+
+    outcome_column : str
+        Outcome used for this prediction task.
+
+    Returns
+    -------
+    torch_dataset : LongGCNTorchDataset
+        Precomputed model-ready patient dataset.
+    """
+
+    # -------------------------------------------------------------------------
+    # 1. CREATE OUTCOME LOOKUP
+    # -------------------------------------------------------------------------
+
+    outcomes = create_outcome_mapping(
+
+        patient_data=patient_data,
+
+        outcome_column=outcome_column
+    )
+
+
+    # -------------------------------------------------------------------------
+    # 2. CREATE MODEL-READY LONGGCN DATASET
+    # -------------------------------------------------------------------------
+
+    torch_dataset = LongGCNTorchDataset(
+
+        longitudinal_dataset=longitudinal_dataset,
+
+        measurement_groups=measurement_groups,
+
+        decay_parameter=DECAY_PARAMETER,
+
+        outcomes=outcomes,
+
+        precompute=PRECOMPUTE
+    )
+
+
+    return torch_dataset
+
+
+# =============================================================================
+# 10. INITIALIZE SUMMARY STORAGE
+# =============================================================================
+
+dataset_summaries = []
+
+
+# =============================================================================
+# 11. PREPARE EACH DATA CONDITION
+# =============================================================================
 
 for condition_name, condition_settings in DATA_CONDITIONS.items():
 
     print()
+    print("=" * 80)
     print(
-        condition_name.upper()
+        f"DATA CONDITION: {condition_name}"
     )
-    print(
-        "-" * len(condition_name)
+    print("=" * 80)
+
+
+    # -------------------------------------------------------------------------
+    # CREATE CONDITION OUTPUT DIRECTORY
+    # -------------------------------------------------------------------------
+
+    condition_directory = (
+        OUTPUT_DIRECTORY
+        /
+        condition_name
     )
 
 
-    # Create a separate output directory for this data condition.
-
-    condition_output_directory = (
-        LONGGCN_DATA_DIRECTORY
-        / condition_name
-    )
-
-
-    condition_output_directory.mkdir(
+    condition_directory.mkdir(
         parents=True,
         exist_ok=True
     )
 
 
-    longgcn_datasets[
-        condition_name
-    ] = {}
+    # -------------------------------------------------------------------------
+    # CREATE DESIGNED MEASUREMENT GROUPS
+    # -------------------------------------------------------------------------
 
+    measurement_groups = (
+        create_measurement_groups(
+            condition_settings[
+                "groups"
+            ]
+        )
+    )
+
+
+    # -------------------------------------------------------------------------
+    # SAVE GROUP DEFINITION
+    # -------------------------------------------------------------------------
+
+    group_definition_path = (
+        condition_directory
+        /
+        "measurement_groups.json"
+    )
+
+
+    with open(
+        group_definition_path,
+        "w",
+        encoding="utf-8"
+    ) as file:
+
+        json.dump(
+            condition_settings[
+                "groups"
+            ],
+            file,
+            indent=4
+        )
+
+
+    # =========================================================================
+    # 12. PREPARE EACH TRAIN / VALIDATION / TEST SPLIT
+    # =========================================================================
 
     for split_name in DATA_SPLITS:
 
-        # ---------------------------------------------------------------------
-        # LOAD VISIT-LEVEL DATA
-        # ---------------------------------------------------------------------
-
-        input_filename = (
-            f"{split_name}_"
-            f"{condition_settings['filename_suffix']}"
-        )
-
-
-        input_path = (
-            SPLIT_DATA_DIRECTORY
-            / input_filename
-        )
-
-
-        visit_level_data = pd.read_csv(
-            input_path
+        print()
+        print(
+            f"Preparing split: {split_name}"
         )
 
 
         # ---------------------------------------------------------------------
-        # CONVERT TO OBSERVATION-LEVEL LONGGCN FORMAT
+        # LOAD LONGITUDINAL DATA
         # ---------------------------------------------------------------------
 
-        observation_level_data = convert_to_longgcn_format(
-            longitudinal_data=visit_level_data,
-            measurement_columns=MEASUREMENT_COLUMNS
+        longitudinal_path = (
+            SPLIT_DIRECTORY
+            /
+            (
+                f"{split_name}_"
+                f"{condition_settings['file_label']}_"
+                "longitudinal_data.csv"
+            )
+        )
+
+
+        wide_longitudinal_data = pd.read_csv(
+            longitudinal_path
         )
 
 
         # ---------------------------------------------------------------------
-        # CONSTRUCT LONGGCN DATA SET
+        # LOAD PATIENT DATA
         # ---------------------------------------------------------------------
 
-        # LongitudinalDataset uses only the patient, time, measurement, and
-        # value columns when constructing the generalized patient-level
-        # representation.
-
-        dataset = LongitudinalDataset(
-            data=observation_level_data,
-            patient_col="patient_id",
-            time_col="time",
-            measurement_col="measurement",
-            value_col="value"
+        patient_path = (
+            SPLIT_DIRECTORY
+            /
+            f"{split_name}_patient_data.csv"
         )
 
 
-        longgcn_datasets[
-            condition_name
-        ][
-            split_name
-        ] = dataset
-
-
-        # ---------------------------------------------------------------------
-        # SAVE OBSERVATION-LEVEL DATA
-        # ---------------------------------------------------------------------
-
-        output_path = (
-            condition_output_directory
-            / f"{split_name}_longgcn_data.csv"
-        )
-
-
-        observation_level_data.to_csv(
-            output_path,
-            index=False
+        patient_data = pd.read_csv(
+            patient_path
         )
 
 
         # ---------------------------------------------------------------------
-        # DISPLAY SUMMARY
+        # CREATE LONGGCN LONGITUDINAL REPRESENTATION
         # ---------------------------------------------------------------------
+
+        (
+            longitudinal_dataset,
+            observation_level_data
+
+        ) = create_longitudinal_dataset(
+            wide_longitudinal_data
+        )
+
 
         print(
-            f"{split_name}: "
-            f"{len(dataset)} patients, "
-            f"{len(observation_level_data)} observed measurements"
+            "  Patients:",
+            len(
+                longitudinal_dataset.patient_ids
+            )
         )
 
 
+        print(
+            "  Observation-level rows:",
+            len(
+                observation_level_data
+            )
+        )
+
+
+        # =====================================================================
+        # 13. CREATE DATASET FOR EACH PREDICTION TASK
+        # =====================================================================
+
+        for task_name, outcome_column in PREDICTION_TASKS.items():
+
+            print(
+                f"  Creating {task_name} dataset..."
+            )
+
+
+            # -----------------------------------------------------------------
+            # CREATE TASK OUTPUT DIRECTORY
+            # -----------------------------------------------------------------
+
+            task_directory = (
+                condition_directory
+                /
+                task_name
+            )
+
+
+            task_directory.mkdir(
+                parents=True,
+                exist_ok=True
+            )
+
+
+            # -----------------------------------------------------------------
+            # CREATE MODEL-READY PYTORCH DATASET
+            # -----------------------------------------------------------------
+
+            torch_dataset = create_torch_dataset(
+
+                longitudinal_dataset=longitudinal_dataset,
+
+                measurement_groups=measurement_groups,
+
+                patient_data=patient_data,
+
+                outcome_column=outcome_column
+            )
+
+
+            # -----------------------------------------------------------------
+            # SAVE LONGGCN DATASET
+            # -----------------------------------------------------------------
+
+            dataset_path = (
+                task_directory
+                /
+                f"{split_name}_dataset.pt"
+            )
+
+
+            torch.save(
+                torch_dataset,
+                dataset_path
+            )
+
+
+            # -----------------------------------------------------------------
+            # GET FIRST PATIENT FOR SUMMARY
+            # -----------------------------------------------------------------
+
+            example_sample = (
+                torch_dataset[
+                    0
+                ]
+            )
+
+
+            # -----------------------------------------------------------------
+            # SAVE DATASET SUMMARY
+            # -----------------------------------------------------------------
+
+            dataset_summaries.append(
+                {
+                    "condition":
+                        condition_name,
+
+                    "task":
+                        task_name,
+
+                    "split":
+                        split_name,
+
+                    "number_of_patients":
+                        len(
+                            torch_dataset
+                        ),
+
+                    "number_of_measurements":
+                        len(
+                            MEASUREMENT_COLUMNS
+                        ),
+
+                    "number_of_groups":
+                        len(
+                            measurement_groups.group_names
+                        ),
+
+                    "group_names":
+                        ", ".join(
+                            measurement_groups.group_names
+                        ),
+
+                    "decay_parameter":
+                        DECAY_PARAMETER,
+
+                    "outcome_column":
+                        outcome_column,
+
+                    "precomputed":
+                        PRECOMPUTE,
+
+                    "example_number_of_times":
+                        example_sample.X.shape[
+                            0
+                        ]
+                }
+            )
+
+
+            print(
+                "    Saved:",
+                dataset_path
+            )
+
+
 # =============================================================================
-# 6. SAVE MEASUREMENT-GROUP DEFINITIONS
+# 14. SAVE DATASET SUMMARY
 # =============================================================================
 
-group_definition_output = {
-    "single_group": SINGLE_GROUP_DEFINITION,
-    "two_group": TWO_GROUP_DEFINITION
-}
-
-
-with open(
-    LONGGCN_DATA_DIRECTORY
-    / "measurement_group_definitions.json",
-    "w"
-) as file:
-
-    json.dump(
-        group_definition_output,
-        file,
-        indent=4
-    )
-
-
-# =============================================================================
-# 7. INSPECT ONE COMPLETE-DATA PATIENT
-# =============================================================================
-
-complete_training_dataset = (
-    longgcn_datasets[
-        "complete"
-    ][
-        "train"
-    ]
+dataset_summary = pd.DataFrame(
+    dataset_summaries
 )
 
 
-# Use the first training patient listed in the saved split file.
-
-training_patient_data = pd.read_csv(
-    SPLIT_DATA_DIRECTORY
-    / "train_patient_data.csv"
+summary_path = (
+    OUTPUT_DIRECTORY
+    /
+    "dataset_summary.csv"
 )
 
 
-example_patient_id = int(
-    training_patient_data[
-        "patient_id"
-    ].iloc[0]
+dataset_summary.to_csv(
+    summary_path,
+    index=False
 )
 
 
-complete_patient = complete_training_dataset[
-    example_patient_id
-]
-
-
-complete_group_data = single_group_design.transform(
-    complete_patient
-)
-
+# =============================================================================
+# 15. PRINT FINAL SUMMARY
+# =============================================================================
 
 print()
-print("============================================================")
-print("EXAMPLE COMPLETE-DATA PATIENT")
-print("============================================================")
-
-print(
-    "Patient ID:",
-    example_patient_id
-)
-
-print(
-    "Number of observation times:",
-    len(complete_patient.times)
-)
-
-print(
-    "X shape:",
-    tuple(
-        complete_patient.X.shape
-    )
-)
-
-print(
-    "Group membership matrix Q shape:",
-    tuple(
-        complete_group_data.Q.shape
-    )
-)
-
-print(
-    "Number of designed groups:",
-    single_group_design.G
-)
-
-
-# =============================================================================
-# 8. INSPECT ONE GROUP-SPECIFIC PATIENT
-# =============================================================================
-
-group_training_dataset = (
-    longgcn_datasets[
-        "group_specific"
-    ][
-        "train"
-    ]
-)
-
-
-group_patient = group_training_dataset[
-    example_patient_id
-]
-
-
-group_data = two_group_design.transform(
-    group_patient
-)
-
-
-print()
-print("============================================================")
-print("EXAMPLE GROUP-SPECIFIC PATIENT")
-print("============================================================")
-
-print(
-    "Patient ID:",
-    example_patient_id
-)
-
-print(
-    "Number of observation times:",
-    len(group_patient.times)
-)
-
-print(
-    "X shape:",
-    tuple(
-        group_patient.X.shape
-    )
-)
-
-print(
-    "Group membership matrix Q shape:",
-    tuple(
-        group_data.Q.shape
-    )
-)
-
-print(
-    "Number of designed groups:",
-    two_group_design.G
-)
-
-
-# =============================================================================
-# 9. CONFIRM OUTPUT
-# =============================================================================
-
-print()
-print("============================================================")
+print("=" * 80)
 print("LONGGCN DATA PREPARATION COMPLETE")
-print("============================================================")
+print("=" * 80)
 
 print()
 print(
-    "Prepared data saved to:",
-    LONGGCN_DATA_DIRECTORY
+    dataset_summary.to_string(
+        index=False
+    )
+)
+
+print()
+print(
+    "Dataset summary saved to:"
+)
+
+print(
+    summary_path
 )
 
 print()
