@@ -237,6 +237,8 @@ def train_model(
     scheduler_factor=0.5,
     scheduler_patience=20,
     minimum_learning_rate=1e-6,
+    early_stopping_patience=100,
+    minimum_validation_improvement=1e-4,
     checkpoint_interval=20,
     print_interval=20
 ):
@@ -393,6 +395,10 @@ def train_model(
 
         patience=scheduler_patience,
 
+        threshold=minimum_validation_improvement,
+
+        threshold_mode="abs",
+
         min_lr=minimum_learning_rate
     )
 
@@ -422,6 +428,19 @@ def train_model(
 
     best_model_state = None
 
+    # -------------------------------------------------------------------------
+    # INITIALIZE EARLY STOPPING
+    # -------------------------------------------------------------------------
+
+    early_stopping_reference_loss = float(
+        "inf"
+    )
+
+    epochs_without_meaningful_improvement = 0
+
+    stopped_early = False
+
+    stop_epoch = number_of_epochs
 
     # =========================================================================
     # 7. TRAINING LOOP
@@ -636,6 +655,83 @@ def train_model(
                 )
 
 
+
+
+        # =====================================================================
+        # EARLY STOPPING
+        # =====================================================================
+
+        meaningful_improvement = (
+
+            validation_loss
+
+            <
+
+            (
+                early_stopping_reference_loss
+                -
+                minimum_validation_improvement
+            )
+        )
+
+
+        if meaningful_improvement:
+
+            early_stopping_reference_loss = (
+                validation_loss
+            )
+
+            epochs_without_meaningful_improvement = 0
+
+
+        else:
+
+            epochs_without_meaningful_improvement += 1
+
+
+        if (
+            epochs_without_meaningful_improvement
+            >=
+            early_stopping_patience
+        ):
+
+            stopped_early = True
+
+            stop_epoch = epoch
+
+
+            print()
+
+            print(
+                "Early stopping triggered at "
+                f"epoch {epoch}."
+            )
+
+            print(
+                "No validation-loss improvement of at least "
+                f"{minimum_validation_improvement} "
+                f"for {early_stopping_patience} epochs."
+            )
+
+            print(
+                "Best validation loss:",
+                round(
+                    best_validation_loss,
+                    6
+                )
+            )
+
+            print(
+                "Best epoch:",
+                best_epoch
+            )
+
+            print()
+
+
+            break
+
+
         # =====================================================================
         # 9. PRINT TRAINING PROGRESS
         # =====================================================================
@@ -713,8 +809,24 @@ def train_model(
             best_epoch,
 
         "best_validation_loss":
-            best_validation_loss
-    }
+            best_validation_loss,
 
+        "epochs_completed":
+            len(
+                training_losses
+            ),
+
+        "stopped_early":
+            stopped_early,
+
+        "stop_epoch":
+            stop_epoch,
+
+        "early_stopping_patience":
+            early_stopping_patience,
+
+        "minimum_validation_improvement":
+            minimum_validation_improvement
+    }
 
     return training_results

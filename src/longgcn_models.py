@@ -667,3 +667,32 @@ class LongGCNPredictionModel(
         )
 
         return predictions
+
+
+def count_model_parameters(
+    model
+):
+    """
+    Count total and trainable model parameters.
+    """
+
+    total_parameters = sum(
+        parameter.numel()
+        for parameter in model.parameters()
+    )
+
+
+    trainable_parameters = sum(
+        parameter.numel()
+        for parameter in model.parameters()
+        if parameter.requires_grad
+    )
+
+
+    return {
+        "total_parameters":
+            total_parameters,
+
+        "trainable_parameters":
+            trainable_parameters
+    }
