@@ -223,25 +223,25 @@ followed by
 ```math
 \text{Group layer 1}
 \rightarrow
-\operatorname{ReLU}
+\text{ReLU}
 ```
 
 ```math
 \text{Group layer 2}
 \rightarrow
-\operatorname{ReLU}
+\text{ReLU}
 ```
 
 ```math
 \text{Temporal layer 1}
 \rightarrow
-\operatorname{ReLU}
+\text{ReLU}
 ```
 
 ```math
 \text{Temporal layer 2}
 \rightarrow
-\operatorname{ReLU}
+\text{ReLU}
 ```
 
 followed by patient-level pooling and a final linear prediction layer.
