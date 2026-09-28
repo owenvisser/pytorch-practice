@@ -1,5 +1,5 @@
 {
-    "condition": "complete",
+    "condition": "group_specific_mcar_to_complete",
     "task": "classification",
     "seed": 100,
     "device": "cuda",
@@ -31,8 +31,8 @@
     "classification_threshold": 0.5,
     "early_stopping_patience": 100,
     "minimum_validation_improvement": 0.0001,
-    "epochs_completed": 339,
+    "epochs_completed": 103,
     "stopped_early": true,
-    "best_epoch": 239,
-    "best_validation_loss": 0.4326447049776713
+    "best_epoch": 3,
+    "best_validation_loss": 0.6413057446479797
 }

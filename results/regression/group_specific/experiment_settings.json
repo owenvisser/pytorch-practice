@@ -1,15 +1,16 @@
 {
-    "condition": "complete",
-    "task": "classification",
+    "condition": "group_specific",
+    "task": "regression",
     "seed": 100,
     "device": "cuda",
     "batch_size": 50,
     "number_of_workers": 0,
     "number_of_measurements": 5,
     "group_names": [
-        "all_measurements"
+        "group_1",
+        "group_2"
     ],
-    "number_of_groups": 1,
+    "number_of_groups": 2,
     "latent_dimension": 8,
     "hidden_dimension": 8,
     "number_of_group_layers": 2,
@@ -18,8 +19,8 @@
     "temporal_aggregation": "sum",
     "parameter_sharing": "group",
     "pooling": "max",
-    "total_parameters": 345,
-    "trainable_parameters": 345,
+    "total_parameters": 489,
+    "trainable_parameters": 489,
     "number_of_epochs": 500,
     "learning_rate": 0.001,
     "weight_decay": 0.0,
@@ -28,11 +29,11 @@
     "minimum_learning_rate": 1e-06,
     "checkpoint_interval": 1,
     "print_interval": 20,
-    "classification_threshold": 0.5,
+    "classification_threshold": null,
     "early_stopping_patience": 100,
     "minimum_validation_improvement": 0.0001,
-    "epochs_completed": 339,
+    "epochs_completed": 207,
     "stopped_early": true,
-    "best_epoch": 239,
-    "best_validation_loss": 0.4326447049776713
+    "best_epoch": 107,
+    "best_validation_loss": 5.122365951538086
 }

@@ -1,6 +1,6 @@
 {
-    "condition": "complete",
-    "task": "classification",
+    "condition": "mcar_to_complete",
+    "task": "regression",
     "seed": 100,
     "device": "cuda",
     "batch_size": 50,
@@ -28,11 +28,11 @@
     "minimum_learning_rate": 1e-06,
     "checkpoint_interval": 1,
     "print_interval": 20,
-    "classification_threshold": 0.5,
+    "classification_threshold": null,
     "early_stopping_patience": 100,
     "minimum_validation_improvement": 0.0001,
-    "epochs_completed": 339,
-    "stopped_early": true,
-    "best_epoch": 239,
-    "best_validation_loss": 0.4326447049776713
+    "epochs_completed": 500,
+    "stopped_early": false,
+    "best_epoch": 475,
+    "best_validation_loss": 4.355971654256185
 }
