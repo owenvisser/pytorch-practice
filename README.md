@@ -18,9 +18,9 @@ The starting point is a simulated irregular longitudinal dataset.
 
 Each patient has a patient-specific sequence of observation times and five possible longitudinal measurements,
 
-\[
+```math
 x_1,\ldots,x_5.
-\]
+```
 
 Patients do not necessarily have the same number of observations or the same observation times. Thus, the data already reflect the type of irregular longitudinal structure that motivates the LongGCN methodology.
 
@@ -78,9 +78,9 @@ The final condition is particularly useful.
 
 For
 
-\[
+```math
 \texttt{group\_specific\_mcar\_to\_group\_specific},
-\]
+```
 
 MICE3D internally performs its normal complete imputation, but after imputation the structurally absent cells from the corresponding `group_specific` dataset are returned to missing.
 
@@ -88,15 +88,15 @@ Consequently, the final dataset has exactly the original group-specific structur
 
 This gives a particularly clean comparison:
 
-\[
+```math
 \text{group-specific + MCAR left missing}
-\]
+```
 
 versus
 
-\[
+```math
 \text{same structural design, but MCAR values imputed}.
-\]
+```
 
 There is also a more aggressive comparison in which MICE3D reconstructs everything, including the structurally absent measurements.
 
@@ -114,25 +114,25 @@ The conceptual starting point is an observation-level representation in which on
 
 LongGCN then constructs a patient-specific time-by-measurement representation,
 
-\[
+```math
 X_i,
-\]
+```
 
 from those observations. Under the generalized formulation, unobserved measurements enter the resulting matrix representation as structural zeros produced by the observation-to-time and observation-to-measurement mappings.
 
 For each patient, the package also constructs the temporal communication matrix
 
-\[
+```math
 T_i,
-\]
+```
 
 whose forward-time entries are based on
 
-\[
+```math
 \exp\left(
 -\frac{\Delta t}{d}
 \right).
-\]
+```
 
 Self-loops have weight 1, earlier observations can send information to later observations, and increasingly distant observations receive smaller weights.
 
@@ -148,9 +148,9 @@ The final structure of the dataset determines how measurements are grouped.
 
 Datasets that are complete or complete-like use one measurement group containing all five variables:
 
-\[
+```math
 \{x_1,x_2,x_3,x_4,x_5\}.
-\]
+```
 
 These conditions include `complete`, `mcar`, `mcar_to_complete`, `group_specific_to_complete`, and `group_specific_mcar_to_complete`.
 
@@ -158,19 +158,19 @@ The fact that `mcar` still uses one group does not mean all values are observed.
 
 Datasets that retain the designed measurement structure use two groups:
 
-\[
+```math
 G_1=\{x_1,x_2,x_3\},
 \qquad
 G_2=\{x_4,x_5\}.
-\]
+```
 
 These are `group_specific`, `group_specific_mcar`, and `group_specific_mcar_to_group_specific`.
 
 For each designed group \(g\), the methodology constructs a group-restricted temporal matrix
 
-\[
+```math
 A_{ig}=P_{ig}T_iP_{ig},
-\]
+```
 
 so that temporal messages within the initial group-specific stage are transmitted only through compatible group structure.
 
@@ -182,7 +182,7 @@ Every one of the eight data conditions is prepared for both prediction tasks and
 
 Therefore,
 
-\[
+```math
 8
 \times
 2
@@ -190,7 +190,7 @@ Therefore,
 3
 =
 48
-\]
+```
 
 serialized `LongGCNTorchDataset` objects are created.
 
@@ -198,9 +198,9 @@ The three datasets belonging to a single condition/task combination are simply t
 
 Thus, the actual number of prediction models being compared is
 
-\[
+```math
 8\times2=16.
-\]
+```
 
 There are eight classification fits and eight regression fits.
 
@@ -214,35 +214,35 @@ The low-level graph construction and neural-network components come from the ins
 
 The current architecture is
 
-\[
+```math
 \text{Initial latent transformation}
-\]
+```
 
 followed by
 
-\[
+```math
 \text{Group layer 1}
 \rightarrow
 \operatorname{ReLU}
-\]
+```
 
-\[
+```math
 \text{Group layer 2}
 \rightarrow
 \operatorname{ReLU}
-\]
+```
 
-\[
+```math
 \text{Temporal layer 1}
 \rightarrow
 \operatorname{ReLU}
-\]
+```
 
-\[
+```math
 \text{Temporal layer 2}
 \rightarrow
 \operatorname{ReLU}
-\]
+```
 
 followed by patient-level pooling and a final linear prediction layer.
 
@@ -264,19 +264,19 @@ For a complete-like dataset there is only one measurement group containing all m
 
 Its group selector is effectively
 
-\[
+```math
 P_{i1}=I,
-\]
+```
 
 so
 
-\[
+```math
 A_{i1}
 =
 P_{i1}T_iP_{i1}
 =
 T_i.
-\]
+```
 
 Thus, for the single-group data, the nominal “group-specific” layers reduce to ordinary temporal graph layers.
 
@@ -318,10 +318,10 @@ Patients have different numbers of observation times, so LongGCN uses padded min
 
 The model receives tensors such as
 
-\[
+```math
 X:
 B\times K_{\max}\times M
-\]
+```
 
 and corresponding graph structures.
 
@@ -341,21 +341,21 @@ Models are trained with Adam.
 
 The current optimizer settings are
 
-\[
+```math
 \text{initial learning rate}=0.001
-\]
+```
 
 and
 
-\[
+```math
 \text{weight decay}=0.
-\]
+```
 
 The optimizer's `weight_decay` parameter is unrelated to the temporal decay parameter \(d\). `weight_decay` would regularize neural-network parameters, whereas \(d\) controls the graph-edge weight
 
-\[
+```math
 \exp(-\Delta t/d).
-\]
+```
 
 The training module uses binary cross-entropy with logits for classification and mean squared error for regression.
 
@@ -375,29 +375,29 @@ The current scheduler is `ReduceLROnPlateau`.
 
 The intended settings for the current models are:
 
-\[
+```math
 \text{initial LR}=0.001,
-\]
+```
 
-\[
+```math
 \text{scheduler patience}=10,
-\]
+```
 
-\[
+```math
 \text{scheduler factor}=0.5,
-\]
+```
 
 and
 
-\[
+```math
 \text{minimum LR}=10^{-6}.
-\]
+```
 
 Thus, if validation loss does not meaningfully improve for approximately ten epochs, the learning rate is halved.
 
 For example,
 
-\[
+```math
 0.001
 \rightarrow
 0.0005
@@ -406,7 +406,7 @@ For example,
 \rightarrow
 0.000125
 \rightarrow\cdots
-\]
+```
 
 as successive validation plateaus occur.
 
@@ -414,9 +414,9 @@ The scheduler evaluates validation loss after every epoch.
 
 A validation-loss improvement of approximately
 
-\[
+```math
 10^{-4}
-\]
+```
 
 is being used as the meaningful-improvement threshold so that extremely small random fluctuations do not repeatedly reset the training logic.
 
@@ -440,23 +440,23 @@ The planned early-stopping patience is 100 epochs without a meaningful validatio
 
 Conceptually, the procedure is therefore:
 
-\[
+```math
 \text{validation improves}
 \Rightarrow
 \text{retain the model and continue}
-\]
+```
 
-\[
+```math
 \text{validation plateaus for 10 epochs}
 \Rightarrow
 \text{halve the learning rate}
-\]
+```
 
-\[
+```math
 \text{validation fails to meaningfully improve for 100 epochs}
 \Rightarrow
 \text{stop training}
-\]
+```
 
 followed by restoration of the best validation model.
 
@@ -484,7 +484,7 @@ For regression, the model's raw scalar output is used directly.
 
 Performance is summarized using
 
-\[
+```math
 \text{MSE},
 \qquad
 \text{RMSE},
@@ -492,7 +492,7 @@ Performance is summarized using
 \text{MAE},
 \qquad
 R^2.
-\]
+```
 
 
 
@@ -508,47 +508,47 @@ The experiment contains several complementary comparisons.
 
 The first benchmark is
 
-\[
+```math
 \texttt{complete}.
-\]
+```
 
 This provides a reference for predictive performance when no measurements are missing.
 
 For conventional missingness, the key comparison is
 
-\[
+```math
 \texttt{mcar}
 \quad\text{versus}\quad
 \texttt{mcar\_to\_complete}.
-\]
+```
 
 This asks whether directly modeling the observed MCAR data using LongGCN performs differently from first reconstructing the missing values using MICE3D.
 
 For structural missingness, the corresponding comparison is
 
-\[
+```math
 \texttt{group\_specific}
 \quad\text{versus}\quad
 \texttt{group\_specific\_to\_complete}.
-\]
+```
 
 This asks whether retaining and explicitly modeling the designed observation structure is competitive with imputing those structurally absent measurements and analyzing the resulting complete representation.
 
 The most detailed comparison uses the group-specific + MCAR data:
 
-\[
+```math
 \texttt{group\_specific\_mcar},
-\]
+```
 
-\[
+```math
 \texttt{group\_specific\_mcar\_to\_group\_specific},
-\]
+```
 
 and
 
-\[
+```math
 \texttt{group\_specific\_mcar\_to\_complete}.
-\]
+```
 
 These represent three distinct strategies:
 
@@ -598,21 +598,21 @@ At a high level, the project is evaluating two competing philosophies for incomp
 
 The first philosophy is:
 
-\[
+```math
 \text{repair the data first}
 \rightarrow
 \text{then fit a prediction model}.
-\]
+```
 
 MICE3D represents this strategy.
 
 The second philosophy is:
 
-\[
+```math
 \text{retain the observed data structure}
 \rightarrow
 \text{let the neural network operate on that structure directly}.
-\]
+```
 
 LongGCN represents this strategy.
 
