@@ -22,3 +22,6 @@ data/
 
 # Jupyter
 .ipynb_checkpoints/
+
+# meeting md
+RoyMeeting.md
