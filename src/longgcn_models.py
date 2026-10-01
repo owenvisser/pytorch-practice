@@ -230,6 +230,8 @@ class LongGCNPredictionModel(
         group_aggregation="sum",
         temporal_aggregation="sum",
         parameter_sharing="group",
+        group_activations=None,
+        temporal_activations=None,
         pooling="max"
     ):
 
@@ -309,8 +311,15 @@ class LongGCNPredictionModel(
         # 3. GROUP-SPECIFIC MESSAGE-PASSING LAYERS
         # ---------------------------------------------------------------------
 
-        self.group_layers = nn.ModuleList()
+        if group_activations is None:
 
+            group_activations = (
+                ["relu"]
+                *
+                number_of_group_layers
+            )
+
+        self.group_layers = nn.ModuleList()
 
         current_dimension = (
             latent_dimension
@@ -331,7 +340,9 @@ class LongGCNPredictionModel(
 
                 aggregation=group_aggregation,
 
-                parameter_sharing=parameter_sharing
+                parameter_sharing=parameter_sharing,
+
+                activation=group_activations[layer_index],
             )
 
 
@@ -349,6 +360,14 @@ class LongGCNPredictionModel(
         # 4. UNRESTRICTED TEMPORAL MESSAGE-PASSING LAYERS
         # ---------------------------------------------------------------------
 
+        if temporal_activations is None:
+
+            temporal_activations = (
+                ["relu"]
+                *
+                number_of_temporal_layers
+            )
+
         self.temporal_layers = nn.ModuleList()
 
 
@@ -362,7 +381,9 @@ class LongGCNPredictionModel(
 
                 output_dim=hidden_dimension,
 
-                aggregation=temporal_aggregation
+                aggregation=temporal_aggregation,
+
+                activation=temporal_activations[layer_index],
             )
 
 
@@ -377,20 +398,7 @@ class LongGCNPredictionModel(
 
 
         # ---------------------------------------------------------------------
-        # 5. ACTIVATION FUNCTION
-        # ---------------------------------------------------------------------
-
-        # Activation is intentionally defined outside the individual LongGCN
-        # layers.
-        #
-        # This keeps the graph layers themselves purely responsible for the
-        # linear/message-passing operation.
-
-        self.activation = nn.ReLU()
-
-
-        # ---------------------------------------------------------------------
-        # 6. PATIENT-LEVEL POOLING
+        # 5. PATIENT-LEVEL POOLING
         # ---------------------------------------------------------------------
 
         self.pooling = create_pooling_layer(
@@ -399,7 +407,7 @@ class LongGCNPredictionModel(
 
 
         # ---------------------------------------------------------------------
-        # 7. DETERMINE POOLED REPRESENTATION DIMENSION
+        # 6. DETERMINE POOLED REPRESENTATION DIMENSION
         # ---------------------------------------------------------------------
 
         # Mean, sum, and max pooling retain the latent dimension.
@@ -429,7 +437,7 @@ class LongGCNPredictionModel(
 
 
         # ---------------------------------------------------------------------
-        # 8. PATIENT-LEVEL PREDICTION LAYER
+        # 7. PATIENT-LEVEL PREDICTION LAYER
         # ---------------------------------------------------------------------
 
         # One raw scalar is returned for each patient.
@@ -521,7 +529,6 @@ class LongGCNPredictionModel(
             batch.X
         )
 
-
         # The initial transformation includes a bias term. Therefore padded
         # zero rows could become nonzero after the transformation.
         #
@@ -541,25 +548,10 @@ class LongGCNPredictionModel(
         for group_layer in self.group_layers:
 
             H = group_layer(
-
                 H=H,
-
                 A=batch.A,
-
                 P=batch.P,
-
                 time_mask=batch.time_mask
-            )
-
-
-            H = self.activation(
-                H
-            )
-
-
-            H = self._apply_time_mask(
-                H,
-                batch.time_mask
             )
 
 
@@ -570,34 +562,18 @@ class LongGCNPredictionModel(
         for temporal_layer in self.temporal_layers:
 
             H = temporal_layer(
-
                 H=H,
-
                 T=batch.T,
-
                 time_mask=batch.time_mask
             )
-
-
-            H = self.activation(
-                H
-            )
-
-
-            H = self._apply_time_mask(
-                H,
-                batch.time_mask
-            )
-
+        
 
         # ---------------------------------------------------------------------
         # 4. PATIENT-LEVEL POOLING
         # ---------------------------------------------------------------------
 
         patient_embeddings = self.pooling(
-
             H,
-
             batch.time_mask
         )
 

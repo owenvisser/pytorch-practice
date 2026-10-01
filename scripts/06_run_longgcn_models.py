@@ -251,6 +251,9 @@ GROUP_AGGREGATION = "sum"
 
 TEMPORAL_AGGREGATION = "sum"
 
+GROUP_ACTIVATIONS = ["relu"] * NUMBER_OF_GROUP_LAYERS
+
+TEMPORAL_ACTIVATIONS = ["relu"] * NUMBER_OF_TEMPORAL_LAYERS
 
 # Each designed group receives its own transformation parameters.
 #
@@ -406,45 +409,22 @@ def load_longgcn_dataset(
     Load one saved LongGCNTorchDataset.
     """
 
-    dataset_path = (
-
-        LONGGCN_DATA_DIRECTORY
-
-        /
-
-        condition
-
-        /
-
-        task
-
-        /
-
-        f"{split_name}_dataset.pt"
-    )
-
+    dataset_path = (LONGGCN_DATA_DIRECTORY/condition/task/f"{split_name}_dataset.pt")
 
     if not dataset_path.exists():
-
         raise FileNotFoundError(
-
             "LongGCN dataset was not found:\n"
             f"{dataset_path}"
         )
-
 
     # LongGCNTorchDataset is a custom Python object, so weights_only=False
     # must be used when loading it.
 
     dataset = torch.load(
-
         dataset_path,
-
         map_location="cpu",
-
         weights_only=False
     )
-
 
     return dataset
 
@@ -474,51 +454,32 @@ def create_data_loaders(
 
 
     train_loader = DataLoader(
-
         train_dataset,
-
         batch_size=BATCH_SIZE,
-
         shuffle=True,
-
         num_workers=NUMBER_OF_WORKERS,
-
         collate_fn=collate_longgcn,
-
         generator=training_generator,
-
         drop_last=False
     )
 
 
     validation_loader = DataLoader(
-
         validation_dataset,
-
         batch_size=BATCH_SIZE,
-
         shuffle=False,
-
         num_workers=NUMBER_OF_WORKERS,
-
         collate_fn=collate_longgcn,
-
         drop_last=False
     )
 
 
     test_loader = DataLoader(
-
         test_dataset,
-
         batch_size=BATCH_SIZE,
-
         shuffle=False,
-
         num_workers=NUMBER_OF_WORKERS,
-
         collate_fn=collate_longgcn,
-
         drop_last=False
     )
 
@@ -625,6 +586,14 @@ def create_model(
 
         temporal_aggregation=(
             TEMPORAL_AGGREGATION
+        ),
+
+        group_activations=(
+            GROUP_ACTIVATIONS
+        ),
+
+        temporal_activations=(
+            TEMPORAL_ACTIVATIONS
         ),
 
         parameter_sharing=(
