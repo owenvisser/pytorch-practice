@@ -46,31 +46,16 @@ Run this script from the root PyTorch-Practice directory using:
 
 from pathlib import Path
 import sys
-
 import pandas as pd
 
-
-# =============================================================================
 # PROJECT PATHS
-# =============================================================================
-
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-
-
-sys.path.insert(
-    0,
-    str(PROJECT_ROOT)
-)
-
+sys.path.insert(0,str(PROJECT_ROOT))
 
 from src.group_specific_masking import apply_group_specific_masking
 from src.missing_data_generation import apply_mcar_missingness
 
-
-# =============================================================================
 # 1. MISSING-DATA SETTINGS
-# =============================================================================
-
 MEASUREMENT_COLUMNS = [
     "x1",
     "x2",
@@ -79,94 +64,40 @@ MEASUREMENT_COLUMNS = [
     "x5"
 ]
 
-
 # MCAR probability applied to each currently observed measurement.
-
 MCAR_MISSING_RATE = 0.30
 
 
 # Approximately half of each patient's observation times will contain
 # measurements x1-x3 and the other half will contain measurements x4-x5.
-
 GROUP_ONE_PROPORTION = 0.50
 
 
 # Separate seeds are used for the different missing-data mechanisms.
-
 MCAR_SEED = 200
-
 GROUP_MASKING_SEED = 300
-
 GROUP_PLUS_MCAR_SEED = 400
 
 # Patient used to test complete absence of one designed measurement group.
-#
 # This patient will never receive x4 or x5.
-
 GROUP_ONE_ONLY_PATIENT_IDS = [
     1
 ]
 
-# =============================================================================
-# 2. INPUT AND OUTPUT DIRECTORIES
-# =============================================================================
-
-SIMULATED_DATA_DIRECTORY = (
-    PROJECT_ROOT
-    / "data"
-    / "simulated"
-)
-
-
-INCOMPLETE_DATA_DIRECTORY = (
-    PROJECT_ROOT
-    / "data"
-    / "incomplete"
-)
-
+# INPUT AND OUTPUT DIRECTORIES
+SIMULATED_DATA_DIRECTORY = (PROJECT_ROOT/"data"/"simulated")
+INCOMPLETE_DATA_DIRECTORY = (PROJECT_ROOT/"data"/"incomplete")
 
 INCOMPLETE_DATA_DIRECTORY.mkdir(
     parents=True,
     exist_ok=True
 )
 
+# LOAD COMPLETE LONGITUDINAL DATA
+complete_data_path = (SIMULATED_DATA_DIRECTORY/"complete_longitudinal_data.csv")
+complete_longitudinal_data = pd.read_csv(complete_data_path)
 
-# =============================================================================
-# 3. LOAD COMPLETE LONGITUDINAL DATA
-# =============================================================================
-
-complete_data_path = (
-    SIMULATED_DATA_DIRECTORY
-    / "complete_longitudinal_data.csv"
-)
-
-
-complete_longitudinal_data = pd.read_csv(
-    complete_data_path
-)
-
-
-print()
-print("============================================================")
-print("GENERATING INCOMPLETE LONGITUDINAL DATA SETS")
-print("============================================================")
-
-print()
-print(
-    "Complete longitudinal data loaded from:",
-    complete_data_path
-)
-
-print(
-    "Number of patient visits:",
-    len(complete_longitudinal_data)
-)
-
-
-# =============================================================================
-# 4. CREATE MCAR-ONLY DATA
-# =============================================================================
-
+# CREATE MCAR-ONLY DATA
 mcar_longitudinal_data, mcar_mask = apply_mcar_missingness(
     longitudinal_data=complete_longitudinal_data,
     missing_rate=MCAR_MISSING_RATE,
@@ -176,66 +107,43 @@ mcar_longitudinal_data, mcar_mask = apply_mcar_missingness(
 )
 
 
-# =============================================================================
-# 5. CREATE GROUP-SPECIFIC MASKED DATA
-# =============================================================================
-
+# CREATE GROUP-SPECIFIC MASKED DATA
 (
     group_masked_longitudinal_data,
     group_assignments,
     group_mask
-
 ) = apply_group_specific_masking(
-
     longitudinal_data=complete_longitudinal_data,
-
     group_one_measurements=[
         "x1",
         "x2",
         "x3"
     ],
-
     group_two_measurements=[
         "x4",
         "x5"
     ],
-
     group_one_proportion=GROUP_ONE_PROPORTION,
-
     group_one_only_patient_ids=GROUP_ONE_ONLY_PATIENT_IDS,
-
     seed=GROUP_MASKING_SEED
 )
 
 
-# =============================================================================
-# 6. APPLY ADDITIONAL MCAR TO GROUP-SPECIFIC DATA
-# =============================================================================
-
+# APPLY ADDITIONAL MCAR TO GROUP-SPECIFIC DATA
 (
     group_mcar_longitudinal_data,
     group_mcar_mask
-
 ) = apply_mcar_missingness(
-
     longitudinal_data=group_masked_longitudinal_data,
-
     missing_rate=MCAR_MISSING_RATE,
-
     measurement_columns=MEASUREMENT_COLUMNS,
-
     preserve_at_least_one_measurement=True,
-
     seed=GROUP_PLUS_MCAR_SEED
 )
 
 
-# =============================================================================
 # CHECK PATIENT WITH NO GROUP 2 MEASUREMENTS
-# =============================================================================
-
 test_patient_id = GROUP_ONE_ONLY_PATIENT_IDS[0]
-
 
 group_specific_test_patient = (
     group_masked_longitudinal_data[
@@ -245,7 +153,6 @@ group_specific_test_patient = (
     ]
 )
 
-
 group_specific_mcar_test_patient = (
     group_mcar_longitudinal_data[
         group_mcar_longitudinal_data[
@@ -254,104 +161,13 @@ group_specific_mcar_test_patient = (
     ]
 )
 
-
-print()
-print("============================================================")
-print(
-    f"CHECKING PATIENT {test_patient_id}: "
-    "NO GROUP 2 MEASUREMENTS"
-)
-print("============================================================")
-
-
-print()
-print("Group-specific data:")
-
-print(
-    group_specific_test_patient[
-        [
-            "patient_id",
-            "visit_number",
-            "time",
-            "x1",
-            "x2",
-            "x3",
-            "x4",
-            "x5"
-        ]
-    ].to_string(
-        index=False
-    )
-)
-
-
-print()
-print("Group-specific + MCAR data:")
-
-print(
-    group_specific_mcar_test_patient[
-        [
-            "patient_id",
-            "visit_number",
-            "time",
-            "x1",
-            "x2",
-            "x3",
-            "x4",
-            "x5"
-        ]
-    ].to_string(
-        index=False
-    )
-)
-
-
-# Confirm that x4 and x5 are absent across the patient's entire record.
-
-assert (
-    group_specific_test_patient[
-        [
-            "x4",
-            "x5"
-        ]
-    ]
-    .isna()
-    .all()
-    .all()
-)
-
-
-assert (
-    group_specific_mcar_test_patient[
-        [
-            "x4",
-            "x5"
-        ]
-    ]
-    .isna()
-    .all()
-    .all()
-)
-
-
-print()
-print(
-    f"Confirmed: patient {test_patient_id} "
-    "has no observed x4 or x5 values."
-)
-
-# =============================================================================
 # 7. CALCULATE MISSING-DATA SUMMARIES
-# =============================================================================
-
 total_measurement_cells = (
     len(complete_longitudinal_data)
     * len(MEASUREMENT_COLUMNS)
 )
 
-
 # COMPLETE DATA
-
 complete_missing = (
     complete_longitudinal_data[
         MEASUREMENT_COLUMNS
@@ -363,7 +179,6 @@ complete_missing = (
 
 
 # MCAR-ONLY DATA
-
 mcar_missing = (
     mcar_longitudinal_data[
         MEASUREMENT_COLUMNS
@@ -372,7 +187,6 @@ mcar_missing = (
     .sum()
     .sum()
 )
-
 
 mcar_newly_removed = (
     mcar_mask[
@@ -387,7 +201,6 @@ mcar_newly_removed = (
 
 
 # GROUP-SPECIFIC DATA
-
 group_missing = (
     group_masked_longitudinal_data[
         MEASUREMENT_COLUMNS
@@ -399,7 +212,6 @@ group_missing = (
 
 
 # GROUP-SPECIFIC + MCAR DATA
-
 group_mcar_missing = (
     group_mcar_longitudinal_data[
         MEASUREMENT_COLUMNS
@@ -408,7 +220,6 @@ group_mcar_missing = (
     .sum()
     .sum()
 )
-
 
 group_mcar_newly_removed = (
     group_mcar_mask[
@@ -424,7 +235,6 @@ group_mcar_newly_removed = (
 
 # Number of measurements that remained available after the
 # group-specific masking step and were therefore eligible for MCAR.
-
 group_observed_before_mcar = (
     group_masked_longitudinal_data[
         MEASUREMENT_COLUMNS
@@ -435,26 +245,20 @@ group_observed_before_mcar = (
 )
 
 
-# =============================================================================
-# 8. CREATE SUMMARY TABLE
-# =============================================================================
-
+# CREATE SUMMARY TABLE
 missing_data_summary = pd.DataFrame({
-
     "dataset": [
         "complete",
         "mcar_only",
         "group_specific",
         "group_specific_plus_mcar"
     ],
-
     "total_measurement_cells": [
         total_measurement_cells,
         total_measurement_cells,
         total_measurement_cells,
         total_measurement_cells
     ],
-
     "missing_measurements": [
         complete_missing,
         mcar_missing,
@@ -489,24 +293,12 @@ missing_data_summary[
 )
 
 
-# =============================================================================
 # 9. DISPLAY MISSING-DATA SUMMARIES
-# =============================================================================
-
-print()
-print("MISSING-DATA SUMMARY")
-print("--------------------")
-
 print(
     missing_data_summary.to_string(
         index=False
     )
 )
-
-
-print()
-print("ADDITIONAL MCAR SUMMARY")
-print("-----------------------")
 
 print(
     "MCAR-only measurements removed:",
@@ -522,9 +314,7 @@ print(
     )
 )
 
-
 print()
-
 print(
     "Measurements available after group masking:",
     group_observed_before_mcar
@@ -546,10 +336,7 @@ print(
 )
 
 
-# =============================================================================
-# 10. DISPLAY EXAMPLE PATIENT
-# =============================================================================
-
+# DISPLAY EXAMPLE PATIENT
 example_patient_id = (
     complete_longitudinal_data[
         "patient_id"
@@ -557,14 +344,10 @@ example_patient_id = (
     .iloc[0]
 )
 
-
 print()
 print(
     f"EXAMPLE: PATIENT {example_patient_id}"
 )
-print("--------------------")
-
-
 example_columns = [
     "patient_id",
     "visit_number",
@@ -576,10 +359,8 @@ example_columns = [
     "x5"
 ]
 
-
 print()
 print("Complete data:")
-
 print(
     complete_longitudinal_data.loc[
         complete_longitudinal_data[
@@ -592,7 +373,6 @@ print(
 
 print()
 print("MCAR-only data:")
-
 print(
     mcar_longitudinal_data.loc[
         mcar_longitudinal_data[
@@ -605,7 +385,6 @@ print(
 
 print()
 print("Group-specific data:")
-
 print(
     group_masked_longitudinal_data.loc[
         group_masked_longitudinal_data[
@@ -618,7 +397,6 @@ print(
 
 print()
 print("Group-specific + MCAR data:")
-
 print(
     group_mcar_longitudinal_data.loc[
         group_mcar_longitudinal_data[
@@ -629,16 +407,12 @@ print(
 )
 
 
-# =============================================================================
-# 11. SAVE MCAR-ONLY DATA
-# =============================================================================
-
+# SAVE DATA
 mcar_longitudinal_data.to_csv(
     INCOMPLETE_DATA_DIRECTORY
     / "mcar_longitudinal_data.csv",
     index=False
 )
-
 
 mcar_mask.to_csv(
     INCOMPLETE_DATA_DIRECTORY
@@ -646,17 +420,11 @@ mcar_mask.to_csv(
     index=False
 )
 
-
-# =============================================================================
-# 12. SAVE GROUP-SPECIFIC DATA
-# =============================================================================
-
 group_masked_longitudinal_data.to_csv(
     INCOMPLETE_DATA_DIRECTORY
     / "group_specific_longitudinal_data.csv",
     index=False
 )
-
 
 group_assignments.to_csv(
     INCOMPLETE_DATA_DIRECTORY
@@ -664,17 +432,11 @@ group_assignments.to_csv(
     index=False
 )
 
-
 group_mask.to_csv(
     INCOMPLETE_DATA_DIRECTORY
     / "group_mask.csv",
     index=False
 )
-
-
-# =============================================================================
-# 13. SAVE GROUP-SPECIFIC DATA WITH ADDITIONAL MCAR
-# =============================================================================
 
 group_mcar_longitudinal_data.to_csv(
     INCOMPLETE_DATA_DIRECTORY
@@ -682,17 +444,11 @@ group_mcar_longitudinal_data.to_csv(
     index=False
 )
 
-
 group_mcar_mask.to_csv(
     INCOMPLETE_DATA_DIRECTORY
     / "group_specific_mcar_mask.csv",
     index=False
 )
-
-
-# =============================================================================
-# 14. SAVE MISSING-DATA SUMMARY
-# =============================================================================
 
 missing_data_summary.to_csv(
     INCOMPLETE_DATA_DIRECTORY
@@ -701,19 +457,6 @@ missing_data_summary.to_csv(
 )
 
 
-# =============================================================================
-# 15. CONFIRM SAVED FILES
-# =============================================================================
-
 print()
-print("============================================================")
-print("INCOMPLETE DATA GENERATION COMPLETE")
-print("============================================================")
-
-print()
-print(
-    "Files saved to:",
-    INCOMPLETE_DATA_DIRECTORY
-)
-
+print("Files saved to:",INCOMPLETE_DATA_DIRECTORY)
 print()
